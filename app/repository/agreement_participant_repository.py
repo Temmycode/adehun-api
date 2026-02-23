@@ -3,7 +3,7 @@ import logging
 from redis import Redis
 from sqlmodel import Session, select
 
-from app.models import AgreementParticipant, Asset
+from app.models import Agreement, AgreementParticipant, Asset
 from app.redis import RedisClient
 
 logger = logging.getLogger(__name__)
@@ -67,6 +67,37 @@ class AgreementParticipantRepository(RedisClient):
         if asset:
             self._cache_set(key, asset, _TTL_PARTICIPANT)
         return asset
+
+    def get_agreement_users(self, agreement_id: str) -> list[AgreementParticipant]:
+        """Get all participants in an agreement"""
+
+        key = _agreement_participant_key(agreement_id)
+        cached = self._cache_get(key)
+        if cached:
+            return [
+                AgreementParticipant.model_validate(participant)
+                for participant in cached
+            ]
+
+        participants = list(
+            self.session.exec(
+                select(AgreementParticipant)
+                .join(
+                    Agreement,
+                    AgreementParticipant.agreement_id == Agreement.agreement_id,  # pyright: ignore[reportArgumentType]
+                )
+                .where(Agreement.agreement_id == agreement_id)
+            )
+        )
+
+        if participants:
+            self._cache_set(
+                key,
+                [participant.model_dump(mode="json") for participant in participants],
+                _TTL_AGREEMENT_PARTICIPANT,
+            )
+
+        return participants
 
     def get_user_participants(self, user_id: str) -> list[AgreementParticipant]:
         """Get all participants assigned to a user"""

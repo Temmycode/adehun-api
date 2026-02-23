@@ -6,7 +6,17 @@ from sqlmodel import Field, SQLModel
 
 class Condition(SQLModel, table=True):
     condition_id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    agreement_id: str = Field(foreign_key="agreement.agreement_id")
+    participant_id: str = Field(foreign_key="agreement_participant.participant_id")
+
+    title: str
     description: str
-    trigger_event_status: str = Field(default="not_met")  # Met/NotMet
+
+    required_from_participant_id: str = Field(
+        foreign_key="agreement_participant.participant_id"
+    )
+
+    status: str = Field(default="pending")
+    # pending / submitted / approved / rejected
+    approved_at: datetime | None = None
+    rejected_reason: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
