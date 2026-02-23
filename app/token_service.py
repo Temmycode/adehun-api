@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 
 import jwt
 from fastapi import Depends, HTTPException
@@ -15,7 +15,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 SECRET_KEY = settings.secret_key
 ALGORITHM = settings.algorithm
 ACCESS_TOKEN_EXPIRATION_MINUTES = settings.access_token_expiration_minutes
-REFRESH_TOKEN_EXPIRATION_DAYS = settings.refresh_token_expiration_minutes
+REFRESH_TOKEN_EXPIRATION_DAYS = settings.refresh_token_expiration_days
 
 
 # ------------------------------------------------------------------
@@ -25,7 +25,7 @@ REFRESH_TOKEN_EXPIRATION_DAYS = settings.refresh_token_expiration_minutes
 
 def create_token(
     user_id: str,
-    token_type: str,
+    token_type: Literal["access", "refresh"],
     expires_delta: timedelta | None = None,
     extra_claims: dict | None = None,
 ):
@@ -57,7 +57,7 @@ def create_token(
 # ------------------------------------------------------------------
 
 
-def verify_token(token: str, expected_type: str):
+def verify_token(token: str, expected_type: Literal["access", "refresh"]):
     # Verify the token and return the user information
     credentials_exception = HTTPException(
         status_code=401,

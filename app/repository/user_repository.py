@@ -5,6 +5,7 @@ from sqlmodel import Session, select
 
 from app.models import User
 from app.redis import RedisClient
+from app.schemas.user_schema import UpdateUserRequest
 
 logger = logging.getLogger(__name__)
 
@@ -80,3 +81,26 @@ class UserRepository(RedisClient):
         user.active = 0
         self.create_user(user)
         return True
+
+    def update_user(self, user_id: str, updated_user: UpdateUserRequest) -> User | None:
+        user = self.get_by_id(user_id)
+
+        if not user:
+            return None
+
+        updated_fields = []
+
+        if updated_user.name:
+            user.name = updated_user.name
+            updated_fields.append("name")
+
+        if updated_user.profile_picture_url:
+            # user.profile_picture_url = updated_user.profile_picture_url
+            updated_fields.append("profile_picture_url")
+
+        if updated_fields:
+            self.session.add(user)
+            self.session.commit()
+            return user
+
+        return None

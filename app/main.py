@@ -2,8 +2,10 @@ import logging
 from contextlib import asynccontextmanager
 
 import cloudinary
+import firebase_admin
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from firebase_admin import credentials
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -12,6 +14,8 @@ from app.config import settings
 from app.database import create_db_and_tables
 from app.logging import configure_logging, silence_third_party_loggers
 from app.rate_limiting import limiter
+
+from .routers import auth, user
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +41,10 @@ cloudinary.config(
 )
 origins = ["*"]
 
+# Firebase Admin SDK initialization
+cred = credentials.Certificate(settings.google_application_credentials)
+firebase_admin.initialize_app()
+
 app = FastAPI(title="Adehun API", version="1.0.0", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(
@@ -51,6 +59,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+app.include_router(auth.router)
+app.include_router(user.router)
 
 
 @app.get("/")
