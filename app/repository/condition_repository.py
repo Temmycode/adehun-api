@@ -3,7 +3,7 @@ import logging
 from redis import Redis
 from sqlmodel import Session, select
 
-from app.models import Condition
+from app.models import AgreementParticipant, Condition
 from app.redis import RedisClient
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ class ConditionRepository(RedisClient):
     #  Condition Operations                                              #
     # ------------------------------------------------------------------ #
 
-    def flutsh_condition(self, condition: Condition) -> Condition:
+    def flush_condition(self, condition: Condition) -> Condition:
         """Add a new item to the database and refresh it."""
         self.session.add(condition)
         self.session.flush()
@@ -57,8 +57,14 @@ class ConditionRepository(RedisClient):
             return [Condition.model_validate(condition) for condition in cached]
 
         conditions = self.session.exec(
-            select(Condition).where(Condition.agreement_id == agreement_id)
+            select(Condition)
+            .join(
+                AgreementParticipant,
+                Condition.participant_id == AgreementParticipant.participant_id,  # pyright: ignore[reportArgumentType]
+            )
+            .where(AgreementParticipant.agreement_id == agreement_id)
         ).all()
+
         if conditions:
             self._cache_set(
                 key,

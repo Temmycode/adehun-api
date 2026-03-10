@@ -47,6 +47,16 @@ class UserRepository(RedisClient):
         self.session.refresh(user)
         return user
 
+    def register_user(self, user_id: str, phone_number: str, name: str) -> User | None:
+        user = self.get_by_id(user_id)
+        if not user:
+            return None
+        user.phone_number = phone_number
+        user.name = name
+        self.session.commit()
+        self.session.refresh(user)
+        return user
+
     def get_by_id(self, user_id: str) -> User | None:
         """
         Fetch a user by PK.
@@ -104,3 +114,14 @@ class UserRepository(RedisClient):
             return user
 
         return None
+
+    def rollback(self):
+        self.session.rollback()
+
+    def flush(self, *kwargs):
+        self.session.add_all(kwargs)
+        self.session.flush()
+        return
+
+    def commit(self):
+        self.session.commit()

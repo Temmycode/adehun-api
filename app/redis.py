@@ -30,11 +30,7 @@ def get_redis_client() -> Redis:
 
 
 def get_redis_dep() -> Generator[Redis, Any, None]:
-    client = get_redis_client()
-    try:
-        yield client
-    finally:
-        client.close()
+    yield get_redis_client()
 
 
 RedisDep = Annotated[Redis, Depends(get_redis_dep)]

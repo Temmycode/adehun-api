@@ -5,7 +5,11 @@ from fastapi import Depends
 from app.database import SessionDep
 from app.models import User
 from app.redis import RedisDep
+from app.repository.agreement_repository import AgreementRepository
+from app.repository.asset_repository import AssetRepository
+from app.repository.condition_repository import ConditionRepository
 from app.repository.user_repository import UserRepository
+from app.service.agreement_service import AgreementService
 from app.service.auth_service import AuthService
 from app.service.user_service import UserService
 from app.token_service import get_active_user, get_current_user
@@ -36,3 +40,39 @@ def get_auth_service(user_repo: UserRepositoryDep):
 
 
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
+
+
+def get_agreement_repository(
+    session: SessionDep, redis: RedisDep
+) -> AgreementRepository:
+    return AgreementRepository(session, redis)
+
+
+AgreementRepositoryDep = Annotated[
+    AgreementRepository, Depends(get_agreement_repository)
+]
+
+
+def get_condition_repository(
+    session: SessionDep, redis: RedisDep
+) -> ConditionRepository:
+    return ConditionRepository(session, redis)
+
+
+ConditionRepositoryDep = Annotated[
+    ConditionRepository, Depends(get_condition_repository)
+]
+
+
+def get_asset_repository(session: SessionDep, redis: RedisDep) -> AssetRepository:
+    return AssetRepository(session, redis)
+
+
+AssetRepositoryDep = Annotated[AssetRepository, Depends(get_asset_repository)]
+
+
+def get_agreement_service(agreement_repo: AgreementRepositoryDep) -> AgreementService:
+    return AgreementService(agreement_repo)
+
+
+AgreementServiceDep = Annotated[AgreementService, Depends(get_agreement_service)]

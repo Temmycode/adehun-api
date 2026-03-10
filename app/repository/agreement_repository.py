@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 from redis import Redis
 from sqlmodel import Session, select
@@ -114,6 +115,24 @@ class AgreementRepository(RedisClient):
                 _agreement_key(agreement.agreement_id), agreement, _TTL_AGREEMENTS
             )
         return agreement
+
+    def flush(self, agreement: Agreement) -> Agreement:
+        """Flush the session's changes to the database."""
+        self.session.add(agreement)
+        self.session.flush()
+        return agreement
+
+    def flush_participant(
+        self, participant: AgreementParticipant
+    ) -> AgreementParticipant:
+        """Flush the session's changes to the database."""
+        self.session.add(participant)
+        self.session.flush()
+        return participant
+
+    def add_all(self, *args: Any) -> None:
+        """Add all given objects to the session."""
+        self.session.add_all(args)
 
     def commit(self) -> None:
         """Commit the current transaction."""

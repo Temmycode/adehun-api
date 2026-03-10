@@ -1,9 +1,9 @@
 import logging
 
-from fastapi import HTTPException
 from firebase_admin import auth
 
 from app import token_service
+from app.exceptions import UserNotFound
 from app.models import User
 from app.repository.user_repository import UserRepository
 from app.schemas.auth_schema import LoginResponse
@@ -26,6 +26,8 @@ class AuthService:
             user_id=firebase_user.uid,
             email=firebase_user.email,
             name=firebase_user.display_name,
+            profile_picture_url=firebase_user.photo_url,
+            phone_number=None,
         )
 
         return self.user_repo.create_user(user)
@@ -69,7 +71,7 @@ class AuthService:
         user = self.user_repo.get_by_id(user_id)
 
         if not user:
-            raise HTTPException(status_code=404, detail="User not found")
+            raise UserNotFound("User not found")
 
         # Create tokens for user
         access_token = token_service.create_token(user_id, "access")
