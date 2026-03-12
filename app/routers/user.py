@@ -3,25 +3,9 @@ from fastapi import APIRouter, HTTPException, Request
 from app.dependencies import ActiveUserDep, UserServiceDep
 from app.exceptions import UserNotFound
 from app.rate_limiting import limiter
-from app.schemas.user_schema import UpdateUserRequest, UserCreateRequest, UserResponse
+from app.schemas.user_schema import UpdateUserRequest, UserResponse
 
 router = APIRouter(prefix="/users", tags=["Users"])
-
-
-@router.post("/", status_code=201, response_model=UserResponse)
-@limiter.limit("6/hour")
-async def register_user(
-    request: Request,
-    register_data: UserCreateRequest,
-    user_service: UserServiceDep,
-) -> UserResponse:
-    """
-    Register a new user.
-    """
-    try:
-        return user_service.register_user(register_data)
-    except UserNotFound as e:
-        raise HTTPException(status_code=404, detail=e.message)
 
 
 @router.get("/current", response_model=UserResponse)

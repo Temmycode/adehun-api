@@ -43,7 +43,7 @@ class RedisClient:
     def _serialize(self, obj: Any) -> str:
         """Serialize a SQLModel/dict to a JSON string."""
         if hasattr(obj, "model_dump"):
-            return json.dumps(obj.model_dump())
+            return json.dumps(obj.model_dump(mode="json"))
         return json.dumps(obj)
 
     def _cache_get(self, key: str) -> Any | None:

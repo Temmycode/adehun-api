@@ -15,7 +15,7 @@ from app.database import create_db_and_tables
 from app.logging import configure_logging, silence_third_party_loggers
 from app.rate_limiting import limiter
 
-from .routers import auth, user
+from .routers import agreement, auth, user
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +63,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(user.router)
+app.include_router(agreement.router)
 
 
 @app.get("/")

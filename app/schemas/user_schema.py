@@ -1,14 +1,11 @@
 from pydantic import BaseModel
 
 
-class UserCreateRequest(BaseModel):
+class UserResponse(BaseModel):
     user_id: str
-    phone_number: str
     name: str
-
-
-class UserResponse(UserCreateRequest):
     email: str
+    phone_number: str | None = None
     profile_picture_url: str | None = None
 
     model_config = {"from_attributes": True}

@@ -1,7 +1,12 @@
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field, Relationship, SQLModel
+
+if TYPE_CHECKING:
+    from .agreement_participant import AgreementParticipant
+    from .invitation import Invitation
 
 
 class User(SQLModel, table=True):
@@ -12,3 +17,10 @@ class User(SQLModel, table=True):
     profile_picture_url: str | None = None
     active: int = Field(default=1, nullable=False)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    participations: list["AgreementParticipant"] = Relationship(
+        back_populates="user", sa_relationship_kwargs={"lazy": "selectin"}
+    )
+    invitations: list["Invitation"] = Relationship(
+        back_populates="invited_by_user", sa_relationship_kwargs={"lazy": "selectin"}
+    )

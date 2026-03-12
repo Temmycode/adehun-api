@@ -1,0 +1,27 @@
+from datetime import datetime
+
+from pydantic import BaseModel
+
+from ..schemas.asset_schema import AssetResponse
+from ..schemas.participant_schema import ParticipantResponse
+
+
+class ConditionCreate(BaseModel):
+    title: str
+    description: str
+    
+
+
+class ConditionResponse(BaseModel):
+    condition_id: str
+    title: str
+    description: str
+    status: str
+    created_by_participant: ParticipantResponse
+    required_from_participant: ParticipantResponse
+    assets: list[AssetResponse]
+    approved_at: datetime | None = None
+    rejected_reason: str | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

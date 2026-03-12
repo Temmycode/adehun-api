@@ -6,7 +6,11 @@ from app import token_service
 from app.exceptions import UserNotFound
 from app.models import User
 from app.repository.user_repository import UserRepository
-from app.schemas.auth_schema import LoginResponse
+from app.schemas.agreement_schema import InvitationResponse
+from app.schemas.auth_schema import LoginResponse, UserCreateRequest
+from app.schemas.user_schema import UserResponse
+
+from ..service.invitation_service import validate_token
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +27,6 @@ class AuthService:
 
         # Create internal user model
         user = User(
-            user_id=firebase_user.uid,
             email=firebase_user.email,
             name=firebase_user.display_name,
             profile_picture_url=firebase_user.photo_url,
@@ -31,6 +34,22 @@ class AuthService:
         )
 
         return self.user_repo.create_user(user)
+
+    def register_user(self, register_data: UserCreateRequest) -> UserResponse:
+        user = self.user_repo.register_user(
+            register_data.user_id, register_data.phone_number, register_data.name
+        )
+        if not user:
+            logger.exception(
+                "Register failed: user not found id=%s", register_data.user_id
+            )
+            raise UserNotFound()
+        return UserResponse.model_validate(user)
+
+    def verify_invitation(self, invitation_token: str) -> dict:
+        """Verify the invitation token and return the user email"""
+
+        return validate_token(self.user_repo.redis_client, invitation_token)
 
     def verify_id_token(self, id_token: str) -> LoginResponse:
         """Verify the ID token and return a LoginResponse object."""
@@ -41,8 +60,12 @@ class AuthService:
         # Get the user ID from the decoded token
         user_id = decoded_token["uid"]
 
+        # check if the user exists in the database through invitation
+        firebase_user = auth.get_user(user_id)
+        user_email = firebase_user.email
+
         # Get the user from the database
-        user = self.user_repo.get_by_id(user_id)
+        user = self.user_repo.get_by_email(user_email)
 
         if not user:
             # create a new user

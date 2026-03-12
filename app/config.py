@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     redis_database_port: str
     resend_api_key: str
     google_application_credentials: str
+    frontend_url: str
 
     model_config = {
         "env_file": ".env.local",

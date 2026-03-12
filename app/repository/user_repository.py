@@ -74,6 +74,13 @@ class UserRepository(RedisClient):
             self._cache_set(key, db_user, _TTL_USER)
         return db_user
 
+    def get_by_email(self, email: str) -> User | None:
+        """
+        Fetch a user by email.
+        """
+        db_user = self.session.exec(select(User).where(User.email == email)).first()
+        return db_user
+
     def deactive_user(self, user_id: str) -> bool:
         """
         Deactives a users account

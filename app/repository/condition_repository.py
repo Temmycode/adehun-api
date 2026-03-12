@@ -3,7 +3,7 @@ import logging
 from redis import Redis
 from sqlmodel import Session, select
 
-from app.models import AgreementParticipant, Condition
+from app.models import Agreement, AgreementParticipant, Condition
 from app.redis import RedisClient
 
 logger = logging.getLogger(__name__)
@@ -57,12 +57,7 @@ class ConditionRepository(RedisClient):
             return [Condition.model_validate(condition) for condition in cached]
 
         conditions = self.session.exec(
-            select(Condition)
-            .join(
-                AgreementParticipant,
-                Condition.participant_id == AgreementParticipant.participant_id,  # pyright: ignore[reportArgumentType]
-            )
-            .where(AgreementParticipant.agreement_id == agreement_id)
+            select(Condition).where(Condition.agreement_id == agreement_id)
         ).all()
 
         if conditions:

@@ -15,3 +15,14 @@ class LoginRequest(BaseModel):
 
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
+
+
+class UserCreateRequest(BaseModel):
+    user_id: str
+    phone_number: str
+    name: str
+
+
+class InviteRegisterRequest(BaseModel):
+    id_token: str
+    invitation_token: str
