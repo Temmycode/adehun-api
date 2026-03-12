@@ -1,5 +1,7 @@
 import logging
 
+from firebase_admin import auth
+
 from app.exceptions import UserNotFound
 from app.repository.user_repository import UserRepository
 from app.schemas.user_schema import UpdateUserRequest, UserResponse

@@ -3,7 +3,7 @@ import logging
 from redis import Redis
 from sqlmodel import Session, select
 
-from app.models import User
+from app.models import Condition, Invitation, User
 from app.redis import RedisClient
 from app.schemas.user_schema import UpdateUserRequest
 
@@ -80,6 +80,26 @@ class UserRepository(RedisClient):
         """
         db_user = self.session.exec(select(User).where(User.email == email)).first()
         return db_user
+
+    def get_invitations_by_email(self, email: str) -> list[Invitation]:
+        """
+        Fetch all invitations for a user by email.
+        """
+        db_invitations = self.session.exec(
+            select(Invitation).where(Invitation.email == email)
+        ).all()
+        return list(db_invitations)
+
+    def get_conditions_with_invitations(
+        self, invitations: list[str]
+    ) -> list[Condition]:
+        """
+        Fetch all conditions for a list of invitation IDs.
+        """
+        db_conditions = self.session.exec(
+            select(Condition).where(Condition.invitation_id.in_(invitations))  # pyright: ignore[reportAttributeAccessIssue, reportOptionalMemberAccess]
+        ).all()
+        return list(db_conditions)
 
     def deactive_user(self, user_id: str) -> bool:
         """

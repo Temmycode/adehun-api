@@ -3,7 +3,7 @@ from typing import Any
 
 from sqlmodel import Session, select
 
-from app.models import Agreement, AgreementParticipant, Invitation, User
+from app.models import Agreement, AgreementParticipant, Condition, Invitation, User
 
 logger = logging.getLogger(__name__)
 
@@ -43,13 +43,24 @@ class AgreementRepository:
         """Return an agreement by its ID."""
         return self.session.exec(
             select(Agreement).where(Agreement.agreement_id == agreement_id)
-        ).one_or_none()
+        ).first()
 
     def get_user_by_email_or_phone(self, email_or_phone: str) -> User | None:
         """Return a user by their email or phone."""
         return self.session.exec(
             select(User).where(
                 (User.email == email_or_phone) | (User.phone_number == email_or_phone)
+            )
+        ).first()
+
+    def get_invitation_by_agreement_id(
+        self, email: str, agreement_id: str
+    ) -> Invitation | None:
+        """Return an invitation by its agreement ID."""
+        return self.session.exec(
+            select(Invitation).where(
+                Invitation.agreement_id == agreement_id,
+                Invitation.email == email,
             )
         ).first()
 
@@ -107,6 +118,23 @@ class AgreementRepository:
         self.session.add(participant)
         self.session.flush()
         return participant
+
+    def update_agreement_conditions_with_invitation(
+        self, agreement_id: str, invitation_id: str, participant_id: str
+    ):
+        """Update the conditions of an agreement to replace the email with the participant's id."""
+        condition = self.session.exec(
+            select(Condition).where(
+                Condition.agreement_id == agreement_id,
+                Condition.invitation_id == invitation_id,
+            )
+        ).first()
+
+        if condition:
+            condition.invitation_id = participant_id
+            self.session.add(condition)
+            self.session.commit()
+            self.session.refresh(condition)
 
     def add_all(self, *args: Any) -> None:
         """Add all given objects to the session."""

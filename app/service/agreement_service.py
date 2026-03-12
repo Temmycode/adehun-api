@@ -1,13 +1,17 @@
 import logging
-from uuid import uuid4
 
 from fastapi import BackgroundTasks
+from firebase_admin import auth
 from redis import Redis
 
 from app.common.enums import InvitationStatus, ParticipantRole
 from app.config import settings
-from app.exceptions import AgreementCreationError, AgreementNotFoundError
-from app.models import Agreement, AgreementParticipant, User
+from app.exceptions import (
+    AgreementAcceptanceError,
+    AgreementCreationError,
+    AgreementNotFoundError,
+)
+from app.models import Agreement, AgreementParticipant
 from app.redis import RedisClient
 from app.repository.agreement_repository import AgreementRepository
 from app.schemas.agreement_schema import (
@@ -173,3 +177,30 @@ class AgreementService(RedisClient):
             )
 
         return agreements
+
+    def accept_agreement(
+        self, agreement_id: str, user_id: str, email: str
+    ) -> AgreementResponse:
+        """Accept an agreement"""
+
+        # Create the agreement participant\
+        invitation = self.agreement_repo.get_invitation_by_agreement_id(
+            email, agreement_id
+        )
+        if not invitation:
+            raise AgreementAcceptanceError("No invitation found for this agreement")
+
+        participant = AgreementParticipant(
+            agreement_id=agreement_id,
+            user_id=user_id,
+            role=invitation.role,
+        )
+        new_participant = self.agreement_repo.flush_participant(participant)
+
+        # Update the conditions that have the users email to use the participant's id
+        self.agreement_repo.update_agreement_conditions_with_invitation(
+            agreement_id, invitation.invitation_id, new_participant.participant_id
+        )
+
+        # fetch the new agreement data
+        return self.get_agreement(agreement_id)

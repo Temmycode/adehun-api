@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 from ..schemas.asset_schema import AssetResponse
 from ..schemas.participant_schema import ParticipantResponse
@@ -9,7 +9,7 @@ from ..schemas.participant_schema import ParticipantResponse
 class ConditionCreate(BaseModel):
     title: str
     description: str
-    
+    required_from_email: EmailStr
 
 
 class ConditionResponse(BaseModel):

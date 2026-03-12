@@ -11,6 +11,7 @@ from app.repository.condition_repository import ConditionRepository
 from app.repository.user_repository import UserRepository
 from app.service.agreement_service import AgreementService
 from app.service.auth_service import AuthService
+from app.service.condition_service import ConditionService
 from app.service.user_service import UserService
 from app.token_service import get_active_user, get_current_user
 
@@ -51,10 +52,8 @@ AgreementRepositoryDep = Annotated[
 ]
 
 
-def get_condition_repository(
-    session: SessionDep, redis: RedisDep
-) -> ConditionRepository:
-    return ConditionRepository(session, redis)
+def get_condition_repository(session: SessionDep) -> ConditionRepository:
+    return ConditionRepository(session)
 
 
 ConditionRepositoryDep = Annotated[
@@ -76,3 +75,12 @@ def get_agreement_service(
 
 
 AgreementServiceDep = Annotated[AgreementService, Depends(get_agreement_service)]
+
+
+def get_condition_service(
+    condition_repo: ConditionRepositoryDep, redis_client: RedisDep
+) -> ConditionService:
+    return ConditionService(condition_repo, redis_client)
+
+
+ConditionServiceDep = Annotated[ConditionService, Depends(get_condition_service)]

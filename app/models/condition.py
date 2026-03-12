@@ -14,12 +14,16 @@ class Condition(SQLModel, table=True):
     condition_id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     agreement_id: str = Field(foreign_key="agreement.agreement_id")
     participant_id: str = Field(foreign_key="agreement_participant.participant_id")
+    # We have this for when the user hasn't accepted an invitation yet
+    invitation_id: str | None = Field(
+        foreign_key="invitation.invitation_id", default=None
+    )
 
     title: str
     description: str
 
-    required_from_participant_id: str = Field(
-        foreign_key="agreement_participant.participant_id"
+    required_from_participant_id: str | None = Field(
+        foreign_key="agreement_participant.participant_id", default=None
     )
 
     status: str = Field(default="pending")

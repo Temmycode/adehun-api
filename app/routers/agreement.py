@@ -1,7 +1,11 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from app.dependencies import ActiveUserDep, AgreementServiceDep
-from app.exceptions import AgreementCreationError, AgreementNotFoundError
+from app.exceptions import (
+    AgreementAcceptanceError,
+    AgreementCreationError,
+    AgreementNotFoundError,
+)
 from app.models import Agreement
 from app.rate_limiting import limiter
 from app.schemas.agreement_schema import AgreementCreate, AgreementResponse
@@ -16,6 +20,7 @@ async def create_agreement(
     current_user: ActiveUserDep,
     agreement_data: AgreementCreate,
     agreement_service: AgreementServiceDep,
+    background_tasks: BackgroundTasks,
 ) -> Agreement:
     """
     Create a new agreement.
@@ -24,7 +29,11 @@ async def create_agreement(
     All user IDs provided in `user_ids` are added as beneficiaries.
     """
     try:
-        return agreement_service.create_agreement(current_user.user_id, agreement_data)
+        return agreement_service.create_agreement(
+            current_user.user_id,
+            agreement_data,
+            background_tasks,
+        )
     except AgreementCreationError as e:
         raise HTTPException(status_code=500, detail=e.message)
 
@@ -43,6 +52,25 @@ async def get_all_user_agreements(
         return agreement_service.get_all_user_agreements(current_user.user_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{agreement_id}/", response_model=AgreementResponse)
+@limiter.limit("10/minute")
+async def accept_agreement(
+    request: Request,
+    current_user: ActiveUserDep,
+    agreement_service: AgreementServiceDep,
+    agreement_id: str,
+) -> AgreementResponse:
+    """
+    Accept an agreement.
+    """
+    try:
+        return agreement_service.accept_agreement(
+            agreement_id, current_user.user_id, current_user.email
+        )
+    except AgreementAcceptanceError as e:
+        raise HTTPException(status_code=500, detail=e.message)
 
 
 @router.get("/{agreement_id}", response_model=AgreementResponse)
