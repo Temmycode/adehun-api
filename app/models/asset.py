@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
-from uuid import uuid4
-
 from typing import TYPE_CHECKING, Optional
+from uuid import uuid4
 
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -15,7 +14,7 @@ class Asset(SQLModel, table=True):
     asset_id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
 
     condition_id: str | None = Field(default=None, foreign_key="condition.condition_id")
-    file_id: str = Field(foreign_key="assetfile.file_id")
+    file_id: str = Field(foreign_key="asset_file.file_id")
 
     uploaded_by: str = Field(foreign_key="agreement_participant.participant_id")
     is_approved: bool = False

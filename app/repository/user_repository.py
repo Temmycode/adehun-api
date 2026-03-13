@@ -32,7 +32,7 @@ def _user_key(user_id: str) -> str:
 
 
 class UserRepository(RedisClient):
-    def __init__(self, session: Session, redis_client: Redis):
+    def __init__(self, session: Session, redis_client: Redis | None):
         super().__init__(redis_client)
         self.session = session
 

@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
-from uuid import uuid4
-
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -14,6 +13,8 @@ if TYPE_CHECKING:
 
 
 class AgreementParticipant(SQLModel, table=True):
+    __tablename__ = "agreement_participant"  # pyright: ignore[reportAssignmentType]
+
     participant_id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     agreement_id: str = Field(foreign_key="agreement.agreement_id")
     user_id: str = Field(foreign_key="user.user_id")

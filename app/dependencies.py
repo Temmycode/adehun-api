@@ -8,10 +8,13 @@ from app.redis import RedisDep
 from app.repository.agreement_repository import AgreementRepository
 from app.repository.asset_repository import AssetRepository
 from app.repository.condition_repository import ConditionRepository
+from app.repository.stats_repository import StatsRepository
 from app.repository.user_repository import UserRepository
 from app.service.agreement_service import AgreementService
+from app.service.asset_service import AssetService
 from app.service.auth_service import AuthService
 from app.service.condition_service import ConditionService
+from app.service.stats_service import StatsService
 from app.service.user_service import UserService
 from app.token_service import get_active_user, get_current_user
 
@@ -68,6 +71,13 @@ def get_asset_repository(session: SessionDep, redis: RedisDep) -> AssetRepositor
 AssetRepositoryDep = Annotated[AssetRepository, Depends(get_asset_repository)]
 
 
+def get_asset_service(repo: AssetRepositoryDep) -> AssetService:
+    return AssetService(repo)
+
+
+AssetServiceDep = Annotated[AssetService, Depends(get_asset_service)]
+
+
 def get_agreement_service(
     agreement_repo: AgreementRepositoryDep, redis_client: RedisDep
 ) -> AgreementService:
@@ -84,3 +94,17 @@ def get_condition_service(
 
 
 ConditionServiceDep = Annotated[ConditionService, Depends(get_condition_service)]
+
+
+def get_stats_repository(session: SessionDep) -> StatsRepository:
+    return StatsRepository(session)
+
+
+StatsRepositoryDep = Annotated[StatsRepository, Depends(get_stats_repository)]
+
+
+def get_stats_service(stats_repo: StatsRepositoryDep) -> StatsService:
+    return StatsService(stats_repo)
+
+
+StatsServiceDep = Annotated[StatsService, Depends(get_stats_service)]

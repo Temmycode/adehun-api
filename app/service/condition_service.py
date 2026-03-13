@@ -1,8 +1,13 @@
 import logging
+from datetime import datetime, timezone
 
 from redis import Redis
 
-from app.exceptions import ConditionNotFoundError, ParticipantNotFoundError
+from app.exceptions import (
+    ConditionNotFoundError,
+    ConditionSaveError,
+    ParticipantNotFoundError,
+)
 from app.models import AgreementParticipant, Condition, Invitation
 from app.redis import RedisClient
 from app.repository.condition_repository import ConditionRepository
@@ -36,7 +41,7 @@ def _agreement_condition(agreement_id: str) -> str:
 # Service
 # ---------------------------------------------------------------------------
 class ConditionService(RedisClient):
-    def __init__(self, condition_repo: ConditionRepository, redis_client: Redis):
+    def __init__(self, condition_repo: ConditionRepository, redis_client: Redis | None):
         super().__init__(redis_client)
         self.condition_repo = condition_repo
 
@@ -81,6 +86,57 @@ class ConditionService(RedisClient):
             if isinstance(other_participant_or_invitation, Invitation)
             else None,
         )
+        try:
+            self.condition_repo.save_condition(condition)
+            return ConditionResponse.model_validate(
+                self.condition_repo.get_by_id(agreement_id, condition.condition_id)
+            )
+        except Exception as e:
+            self.condition_repo.rollback()
+            logger.exception("Condition save failed: %s", e)
+            raise ConditionSaveError() from e
+
+    def approve_condition(
+        self, agreement_id: str, condition_id: str, user_id: str
+    ) -> ConditionResponse:
+        """Approve a condition for a given agreement."""
+        condition = self.condition_repo.get_by_id(agreement_id, condition_id)
+        if not condition:
+            raise ConditionNotFoundError()
+
+        # Ensure the user who is approving is the participant who create the condition
+        participant = self.condition_repo.get_participant(user_id, agreement_id)
+        if not participant:
+            raise ParticipantNotFoundError()
+        if participant.participant_id != condition.participant_id:
+            raise PermissionError(
+                "Only the participant who created the condition can approve it."
+            )
+
+        condition.approved_at = datetime.now(timezone.utc)
+        condition.status = "approved"
+        self.condition_repo.save_condition(condition)
+        return ConditionResponse.model_validate(condition)
+
+    def reject_condition(
+        self, agreement_id: str, condition_id: str, user_id: str, rejected_reason: str
+    ) -> ConditionResponse:
+        """Reject a condition for a given agreement."""
+        condition = self.condition_repo.get_by_id(agreement_id, condition_id)
+        if not condition:
+            raise ConditionNotFoundError()
+
+        # Ensure the user who is approving is the participant who create the condition
+        participant = self.condition_repo.get_participant(user_id, agreement_id)
+        if not participant:
+            raise ParticipantNotFoundError()
+        if participant.participant_id != condition.participant_id:
+            raise PermissionError(
+                "Only the participant who created the condition can approve it."
+            )
+
+        condition.rejected_reason = rejected_reason
+        condition.status = "rejected"
         self.condition_repo.save_condition(condition)
         return ConditionResponse.model_validate(condition)
 

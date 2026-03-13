@@ -17,7 +17,9 @@ class Agreement(SQLModel, table=True):
     title: str
     description: str
     amount: Decimal
-    status: str = Field(default="pending")  # Pending/Active/Disputed/Cancelled/Refunded
+    status: str = Field(
+        default="pending"
+    )  # Pending/Active/Disputed/Cancelled/Completed/Refunded
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     conditions: list["Condition"] = Relationship(

@@ -1,9 +1,10 @@
 import logging
+from typing import Any
 
 from redis import Redis
 from sqlmodel import Session, select
 
-from app.models import Asset
+from app.models import AgreementParticipant, Asset, Condition
 from app.redis import RedisClient
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ def _agreement_asset_key(agreement_id: str) -> str:
 # Repository
 # ---------------------------------------------------------------------------
 class AssetRepository(RedisClient):
-    def __init__(self, session: Session, redis_client: Redis):
+    def __init__(self, session: Session, redis_client: Redis | None):
         super().__init__(redis_client)
         self.session = session
 
@@ -41,11 +42,10 @@ class AssetRepository(RedisClient):
     #  Asset Operations                                                  #
     # ------------------------------------------------------------------ #
 
-    def flush_asset(self, asset: Asset) -> Asset:
+    def add_and_flush(self, *args: Any):
         """Flush an asset to the database to retrieve the id"""
-        self.session.add(asset)
+        self.session.add_all(args)
         self.session.flush()
-        return asset
 
     def get_by_id(self, asset_id: str) -> Asset | None:
         """Get an asset by id"""
@@ -61,6 +61,27 @@ class AssetRepository(RedisClient):
             self._cache_set(key, asset, _TTL_ASSETS)
         return asset
 
+    def get_assets_by_ids(self, asset_ids: list[str]) -> list[Asset]:
+        """Get assets by ids"""
+        return list(
+            self.session.exec(select(Asset).where(Asset.asset_id.in_(asset_ids))).all()  # pyright: ignore[reportAttributeAccessIssue]
+        )
+
+    def get_condition(self, condition_id: str) -> Condition | None:
+        """Get a condition by id"""
+        return self.session.get(Condition, condition_id)
+
+    def get_participant(
+        self, user_id: str, agreement_id: str
+    ) -> AgreementParticipant | None:
+        """Get a participant by user_id and agreement_id"""
+        return self.session.exec(
+            select(AgreementParticipant).where(
+                AgreementParticipant.user_id == user_id,
+                AgreementParticipant.agreement_id == agreement_id,
+            )
+        ).first()
+
     def get_agreement_assets(self, agreement_id: str) -> list[Asset]:
         """Get all assets assigned to an agreement"""
         key = _agreement_asset_key(agreement_id)
@@ -70,7 +91,9 @@ class AssetRepository(RedisClient):
 
         assets = list(
             self.session.exec(
-                select(Asset).where(Asset.agreement_id == agreement_id)
+                select(Asset)
+                .join(Condition)
+                .where(Condition.agreement_id == agreement_id)
             ).all()
         )
         if assets:

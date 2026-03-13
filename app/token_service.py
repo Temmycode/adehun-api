@@ -10,7 +10,7 @@ from app.models import User
 
 from .config import settings
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/dev-login")
 
 SECRET_KEY = settings.secret_key
 ALGORITHM = settings.algorithm
@@ -35,12 +35,12 @@ def create_token(
         else timedelta(days=REFRESH_TOKEN_EXPIRATION_DAYS)
     )
 
-    expire = (
-        datetime.now(timezone.utc) + expires_delta if expires_delta else expire_delta
+    expire = datetime.now(timezone.utc) + (
+        expires_delta if expires_delta else expire_delta
     )
 
     payload = {
-        "user_id": user_id,
+        "sub": user_id,
         "type": token_type,
         "exp": expire,
     }
@@ -85,7 +85,7 @@ def verify_token(token: str, expected_type: Literal["access", "refresh"]):
 
 def get_current_user(
     token: Annotated[str, Depends(oauth2_scheme)], session: SessionDep
-):
+) -> User:
     user_id = verify_token(token, "access")["sub"]
 
     # Fetch user information from the database
@@ -100,7 +100,9 @@ def get_current_user(
     return user
 
 
-def get_active_user(token: Annotated[str, Depends(oauth2_scheme)], session: SessionDep):
+def get_active_user(
+    token: Annotated[str, Depends(oauth2_scheme)], session: SessionDep
+) -> User:
     user_id = verify_token(token, "access")["sub"]
 
     # Fetch user information from the database
@@ -112,7 +114,7 @@ def get_active_user(token: Annotated[str, Depends(oauth2_scheme)], session: Sess
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if not user.active == 0:
+    if user.active == 0:
         raise HTTPException(
             status_code=400,
             detail="Inactive user",

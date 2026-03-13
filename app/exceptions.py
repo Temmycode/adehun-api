@@ -37,6 +37,12 @@ class ConditionNotFoundError(Exception):
         super().__init__(self.message)
 
 
+class ConditionSaveError(Exception):
+    def __init__(self, message="Failed to save condition"):
+        self.message = message
+        super().__init__(self.message)
+
+
 class ParticipantNotFoundError(Exception):
     def __init__(self, message="Participant not found in agreement"):
         self.message = message
@@ -45,5 +51,11 @@ class ParticipantNotFoundError(Exception):
 
 class AgreementAcceptanceError(Exception):
     def __init__(self, message="Failed to accept agreement"):
+        self.message = message
+        super().__init__(self.message)
+
+
+class AssetUploadError(Exception):
+    def __init__(self, message="Failed to upload asset"):
         self.message = message
         super().__init__(self.message)

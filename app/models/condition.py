@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 from uuid import uuid4
 
 from sqlmodel import Field, Relationship, SQLModel
@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from .agreement import Agreement
     from .agreement_participant import AgreementParticipant
     from .asset import Asset
+    from .invitation import Invitation
 
 
 class Condition(SQLModel, table=True):
@@ -42,7 +43,7 @@ class Condition(SQLModel, table=True):
             "lazy": "selectin",
         },
     )
-    required_from_participant: "AgreementParticipant" = Relationship(
+    required_from_participant: Optional["AgreementParticipant"] = Relationship(
         back_populates="conditions_required",
         sa_relationship_kwargs={
             "foreign_keys": "[Condition.required_from_participant_id]",
@@ -50,5 +51,8 @@ class Condition(SQLModel, table=True):
         },
     )
     assets: list["Asset"] = Relationship(
+        back_populates="condition", sa_relationship_kwargs={"lazy": "selectin"}
+    )
+    invitation: Optional["Invitation"] = Relationship(
         back_populates="condition", sa_relationship_kwargs={"lazy": "selectin"}
     )

@@ -11,11 +11,13 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from app.config import settings
-from app.database import create_db_and_tables
 from app.logging import configure_logging, silence_third_party_loggers
 from app.rate_limiting import limiter
 
-from .routers import agreement, auth, user
+from .routers import agreement, asset, auth, condition, stats, user
+
+if settings.debug:
+    from .routers import dev
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +30,6 @@ silence_third_party_loggers()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting application...")
-    create_db_and_tables()
     yield
     logger.info("Application shutdown...")
 
@@ -64,6 +65,12 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(user.router)
 app.include_router(agreement.router)
+app.include_router(condition.router)
+app.include_router(asset.router)
+app.include_router(stats.router)
+
+if settings.debug:
+    app.include_router(dev.router)
 
 
 @app.get("/")

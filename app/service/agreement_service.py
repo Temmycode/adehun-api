@@ -59,7 +59,7 @@ def _user_agreements_key(user_id: str) -> str:
 
 
 class AgreementService(RedisClient):
-    def __init__(self, agreement_repo: AgreementRepository, redis_client: Redis):
+    def __init__(self, agreement_repo: AgreementRepository, redis_client: Redis | None):
         super().__init__(redis_client)
         self.agreement_repo = agreement_repo
 
@@ -87,12 +87,12 @@ class AgreementService(RedisClient):
         store_invitation(
             self.redis_client, invitation_token, invitation_data.model_dump(mode="json")
         )
-        invitation_link = f"{settings.frontend_url}/invite?token={invitation_token}"
-        background_tasks.add_task(
-            "EmailService.send_tutor_invitation",
-            email,
-            invitation_link,
-        )
+        # invitation_link = f"{settings.frontend_url}/invite?token={invitation_token}"
+        # background_tasks.add_task(
+        #     "EmailService.send_tutor_invitation",
+        #     email,
+        #     invitation_link,
+        # )
         logger.debug(
             "Invite participant succeeded",
             extra={"email": email},
@@ -103,7 +103,7 @@ class AgreementService(RedisClient):
         current_user_id: str,
         agreement_data: AgreementCreate,
         background_tasks: BackgroundTasks,
-    ) -> Agreement:
+    ) -> AgreementResponse:
         try:
             # create agreement
             agreement = self.agreement_repo.flush(
@@ -123,9 +123,6 @@ class AgreementService(RedisClient):
             )
             self.agreement_repo.flush_participant(creator)
 
-            # save all
-            self.agreement_repo.commit()
-
             self._invite_participant(
                 agreement_data.role,
                 creator.user_id,
@@ -134,7 +131,13 @@ class AgreementService(RedisClient):
                 agreement,
                 background_tasks,
             )
-            return agreement
+
+            # save all
+            self.agreement_repo.commit()
+
+            return AgreementResponse.model_validate(
+                self.agreement_repo.get_by_id(agreement.agreement_id)
+            )
         except Exception as err:
             logger.exception("Failed to save agreement")
             self.agreement_repo.rollback()

@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     resend_api_key: str
     google_application_credentials: str
     frontend_url: str
+    debug: bool = True
 
     model_config = {
         "env_file": ".env.local",

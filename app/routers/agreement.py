@@ -13,7 +13,7 @@ from app.schemas.agreement_schema import AgreementCreate, AgreementResponse
 router = APIRouter(prefix="/agreements", tags=["Agreements"])
 
 
-@router.post("/", status_code=201, response_model=Agreement)
+@router.post("/", status_code=201, response_model=AgreementResponse)
 @limiter.limit("10/minute")
 async def create_agreement(
     request: Request,
@@ -21,7 +21,7 @@ async def create_agreement(
     agreement_data: AgreementCreate,
     agreement_service: AgreementServiceDep,
     background_tasks: BackgroundTasks,
-) -> Agreement:
+) -> AgreementResponse:
     """
     Create a new agreement.
 

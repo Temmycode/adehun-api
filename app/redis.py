@@ -13,31 +13,35 @@ logger = logging.getLogger(__name__)
 _redis_client: Redis | None = None
 
 
-def get_redis_client() -> Redis:
+def get_redis_client() -> Redis | None:
     global _redis_client
     if _redis_client is None:
-        _redis_client = Redis(
-            host=settings.redis_database_host,
-            port=int(settings.redis_database_port),
-            decode_responses=True,
-            username="default",
-            password=settings.redis_database_password,
-        )
-        _redis_client.ping()
-        logger.info("Redis client initialized")
+        try:
+            _redis_client = Redis(
+                host=settings.redis_database_host,
+                port=int(settings.redis_database_port),
+                decode_responses=True,
+                username="default",
+                password=settings.redis_database_password,
+            )
+            _redis_client.ping()
+            logger.info("Redis client initialized")
+        except Exception:
+            _redis_client = None
+            logger.exception("Failed to initialize Redis client")
 
     return _redis_client
 
 
-def get_redis_dep() -> Generator[Redis, Any, None]:
+def get_redis_dep() -> Generator[Redis | None, Any, None]:
     yield get_redis_client()
 
 
-RedisDep = Annotated[Redis, Depends(get_redis_dep)]
+RedisDep = Annotated[Redis | None, Depends(get_redis_dep)]
 
 
 class RedisClient:
-    def __init__(self, client: Redis):
+    def __init__(self, client: Redis | None):
         self.redis_client = client
 
     def _serialize(self, obj: Any) -> str:
@@ -48,6 +52,8 @@ class RedisClient:
 
     def _cache_get(self, key: str) -> Any | None:
         """Return parsed JSON value from Redis, or None on miss/error."""
+        if self.redis_client is None:
+            return None
         try:
             raw = self.redis_client.get(key)
             if raw is None:
@@ -62,6 +68,8 @@ class RedisClient:
             return None
 
     def _cache_set(self, key: str, value: Any, ttl: int):
+        if self.redis_client is None:
+            return None
         try:
             self.redis_client.setex(key, ttl, self._serialize(value))
         except Exception:
@@ -69,6 +77,8 @@ class RedisClient:
 
     def _cache_delete(self, *keys: str):
         """Delete one or more cache keys (best-effort)."""
+        if self.redis_client is None:
+            return None
         try:
             self.redis_client.delete(*keys)
             logger.debug("Cache DEL   keys=%s", keys)

@@ -18,6 +18,8 @@ class AgreementInvitationResponse(BaseModel):
     status: str
     expires_at: datetime
 
+    model_config = {"from_attributes": True}
+
 
 class AgreementCreate(BaseModel):
     # Agreement Participants
@@ -31,13 +33,16 @@ class AgreementCreate(BaseModel):
 
 
 class AgreementResponse(BaseModel):
+    agreement_id: str
     title: str
     description: str
+    amount: Decimal
     status: str
     conditions: list[ConditionResponse]
     participants: list[ParticipantResponse]
     transactions: list[TransactionResponse]
     invitations: list[AgreementInvitationResponse]
+    created_at: datetime
 
     model_config = {"from_attributes": True}
 
