@@ -59,3 +59,9 @@ class AssetUploadError(Exception):
     def __init__(self, message="Failed to upload asset"):
         self.message = message
         super().__init__(self.message)
+
+
+class AssetRetrievalError(Exception):
+    def __init__(self, message="Failed to retrieve assets"):
+        self.message = message
+        super().__init__(self.message)

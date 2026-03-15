@@ -1,18 +1,14 @@
 import logging
 
 from fastapi import BackgroundTasks
-from firebase_admin import auth
-from redis import Redis
 
-from app.common.enums import InvitationStatus, ParticipantRole
-from app.config import settings
+from app.common.enums import InvitationStatus
 from app.exceptions import (
     AgreementAcceptanceError,
     AgreementCreationError,
     AgreementNotFoundError,
 )
 from app.models import Agreement, AgreementParticipant
-from app.redis import RedisClient
 from app.repository.agreement_repository import AgreementRepository
 from app.schemas.agreement_schema import (
     AgreementCreate,
@@ -28,39 +24,8 @@ from ..service.invitation_service import (
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# TTL constants (seconds)
-# ---------------------------------------------------------------------------
-_TTL_LIST = 60 * 5  # 5 min   – list/collection keys
-_TTL_USER_AGREEMENTS = 60 * 60 * 24  # 24 hours – cache TTL
-_TTL_AGREEMENTS = 60 * 60 * 24  # 24 hours – cache TTL
-_NONE_SENTINEL = "__none__"
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _agreement_key(agreement_id: str) -> str:
-    return f"agreement:{agreement_id}"
-
-
-def _agreement_participant_key(agreement_id: str, participant_id: str) -> str:
-    return f"agreement:{agreement_id}:participant:{participant_id}"
-
-
-def _condition_key(condition_id: str) -> str:
-    return f"condition:{condition_id}"
-
-
-def _user_agreements_key(user_id: str) -> str:
-    return f"user:{user_id}:agreements"
-
-
-class AgreementService(RedisClient):
-    def __init__(self, agreement_repo: AgreementRepository, redis_client: Redis | None):
-        super().__init__(redis_client)
+class AgreementService:
+    def __init__(self, agreement_repo: AgreementRepository):
         self.agreement_repo = agreement_repo
 
     def _invite_participant(
@@ -84,9 +49,12 @@ class AgreementService(RedisClient):
         )
         invitation_data = InvitationResponse.model_validate(invitation)
 
-        store_invitation(
-            self.redis_client, invitation_token, invitation_data.model_dump(mode="json")
-        )
+        if self.agreement_repo.redis_client:
+            store_invitation(
+                self.agreement_repo.redis_client,
+                invitation_token,
+                invitation_data.model_dump(mode="json"),
+            )
         # invitation_link = f"{settings.frontend_url}/invite?token={invitation_token}"
         # background_tasks.add_task(
         #     "EmailService.send_tutor_invitation",
@@ -145,41 +113,19 @@ class AgreementService(RedisClient):
 
     def get_agreement(self, agreement_id: str) -> AgreementResponse:
         """Get agreement by id"""
-        key = _agreement_key(agreement_id)
-        cached = self._cache_get(key)
-        if cached is not None:
-            logger.debug("Returning agreement id=%d", agreement_id)
-            return AgreementResponse.model_validate(cached)
-
         db_agreement = self.agreement_repo.get_by_id(agreement_id)
         if db_agreement is None:
             raise AgreementNotFoundError()
 
-        agreement = AgreementResponse.model_validate(db_agreement)
-        self._cache_set(key, agreement, _TTL_AGREEMENTS)
-        return agreement
+        return AgreementResponse.model_validate(db_agreement)
 
     def get_all_user_agreements(self, user_id: str) -> list[AgreementResponse]:
         """Get all agreements for a user"""
-        key = _user_agreements_key(user_id)
-        cached = self._cache_get(key)
-        if cached is not None:
-            logger.debug("Returning agreements for user id=%d", user_id)
-            return [AgreementResponse.model_validate(agreement) for agreement in cached]
 
         db_agreements = self.agreement_repo.get_user_agreements(user_id)
-        agreements = [
+        return [
             AgreementResponse.model_validate(agreement) for agreement in db_agreements
         ]
-
-        if agreements:
-            self._cache_set(
-                key,
-                [agreement.model_dump(mode="json") for agreement in agreements],
-                _TTL_USER_AGREEMENTS,
-            )
-
-        return agreements
 
     def accept_agreement(
         self, agreement_id: str, user_id: str, email: str

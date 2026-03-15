@@ -54,5 +54,5 @@ class Condition(SQLModel, table=True):
         back_populates="condition", sa_relationship_kwargs={"lazy": "selectin"}
     )
     invitation: Optional["Invitation"] = Relationship(
-        back_populates="condition", sa_relationship_kwargs={"lazy": "selectin"}
+        back_populates="conditions", sa_relationship_kwargs={"lazy": "selectin"}
     )

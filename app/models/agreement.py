@@ -22,15 +22,9 @@ class Agreement(SQLModel, table=True):
     )  # Pending/Active/Disputed/Cancelled/Completed/Refunded
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-    conditions: list["Condition"] = Relationship(
-        back_populates="agreement", sa_relationship_kwargs={"lazy": "selectin"}
-    )
+    conditions: list["Condition"] = Relationship(back_populates="agreement")
     participants: list["AgreementParticipant"] = Relationship(
-        back_populates="agreement", sa_relationship_kwargs={"lazy": "selectin"}
+        back_populates="agreement"
     )
-    transactions: list["Transaction"] = Relationship(
-        back_populates="agreement", sa_relationship_kwargs={"lazy": "selectin"}
-    )
-    invitations: list["Invitation"] = Relationship(
-        back_populates="agreement", sa_relationship_kwargs={"lazy": "selectin"}
-    )
+    transactions: list["Transaction"] = Relationship(back_populates="agreement")
+    invitations: list["Invitation"] = Relationship(back_populates="agreement")

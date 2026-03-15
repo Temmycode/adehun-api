@@ -1,19 +1,49 @@
 import logging
 
+from redis import Redis
 from sqlmodel import Session, select
 
-from app.models import Agreement, AgreementParticipant, Condition, Invitation, User
+from app.models import AgreementParticipant, Condition, Invitation, User
 from app.redis import RedisClient
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# TTL constants (seconds)
+# ---------------------------------------------------------------------------
+_TTL_AGREEMENT_CONDITIONS = 60 * 5  # 5 minutes – cache TTL
+_TTL_CONDITION = 60 * 5  # 5 minutes – cache TTL
+_NONE_SENTINEL = "__none__"
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _agreement_key(agreement_id: str) -> str:
+    return f"agreement:{agreement_id}"
+
+
+def _condition_key(condition_id: str) -> str:
+    return f"condition:{condition_id}"
+
+
+def _user_agreements_key(user_id: str) -> str:
+    return f"user:{user_id}:agreements"
+
+
+def _agreement_condition(agreement_id: str) -> str:
+    return f"agreement:{agreement_id}:condition"
 
 
 # ---------------------------------------------------------------------------
 # Repository
 # ---------------------------------------------------------------------------
-class ConditionRepository:
-    def __init__(self, session: Session):
+class ConditionRepository(RedisClient):
+    def __init__(self, session: Session, redis_client: Redis | None):
         self.session = session
+        super().__init__(redis_client)
 
     # ------------------------------------------------------------------ #
     #  Condition Operations                                              #
@@ -34,12 +64,19 @@ class ConditionRepository:
 
     def get_by_id(self, agreement_id: str, condition_id: str) -> Condition | None:
         """Return an agreement by its ID."""
-        return self.session.exec(
+        key = _condition_key(condition_id)
+        cached = self._cache_get(key)
+        if cached is not None:
+            return Condition.model_validate(cached)
+
+        condition = self.session.exec(
             select(Condition).where(
                 Condition.agreement_id == agreement_id,
                 Condition.condition_id == condition_id,
             )
         ).one_or_none()
+        self._cache_set(key, condition, _TTL_CONDITION)
+        return condition
 
     def get_participant(
         self, user_id: str, agreement_id: str

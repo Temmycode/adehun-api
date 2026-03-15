@@ -14,7 +14,7 @@ from app.config import settings
 from app.logging import configure_logging, silence_third_party_loggers
 from app.rate_limiting import limiter
 
-from .routers import agreement, asset, auth, condition, stats, user
+from .routers import agreement, asset, auth, condition, dev, stats, user
 
 if settings.debug:
     from .routers import dev

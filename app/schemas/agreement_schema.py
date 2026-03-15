@@ -5,10 +5,6 @@ from pydantic import BaseModel
 
 from app.schemas.user_schema import UserResponse
 
-from ..schemas.conditions_schema import ConditionResponse
-from ..schemas.participant_schema import ParticipantResponse
-from ..schemas.transactions_schema import TransactionResponse
-
 
 class AgreementInvitationResponse(BaseModel):
     invitation_id: str
@@ -38,10 +34,6 @@ class AgreementResponse(BaseModel):
     description: str
     amount: Decimal
     status: str
-    conditions: list[ConditionResponse]
-    participants: list[ParticipantResponse]
-    transactions: list[TransactionResponse]
-    invitations: list[AgreementInvitationResponse]
     created_at: datetime
 
     model_config = {"from_attributes": True}

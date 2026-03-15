@@ -4,7 +4,7 @@ from typing import Any
 from redis import Redis
 from sqlmodel import Session, select
 
-from app.models import AgreementParticipant, Asset, Condition
+from app.models import Agreement, AgreementParticipant, Asset, Condition
 from app.redis import RedisClient
 
 logger = logging.getLogger(__name__)
@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 _TTL_AGREEMENT_ASSETS = 60 * 60 * 24  # 24 hours – cache TTL
 _TTL_ASSETS = 60 * 60 * 24  # 24 hours – cache TTL
+_TTL_CONDITION_ASSETS = 60 * 60 * 24  # 24 hours – cache TTL
 _NONE_SENTINEL = "__none__"
 
 
@@ -28,6 +29,10 @@ def _asset_key(asset_id: str) -> str:
 
 def _agreement_asset_key(agreement_id: str) -> str:
     return f"agreement:{agreement_id}:asset"
+
+
+def _condition_asset_key(condition_id: str) -> str:
+    return f"condition:{condition_id}:asset"
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +76,10 @@ class AssetRepository(RedisClient):
         """Get a condition by id"""
         return self.session.get(Condition, condition_id)
 
+    def get_agreement(self, agreement_id: str) -> Agreement | None:
+        """Get an agreement by id"""
+        return self.session.get(Agreement, agreement_id)
+
     def get_participant(
         self, user_id: str, agreement_id: str
     ) -> AgreementParticipant | None:
@@ -101,6 +110,27 @@ class AssetRepository(RedisClient):
                 key,
                 [asset.model_dump(mode="json") for asset in assets],
                 _TTL_AGREEMENT_ASSETS,
+            )
+        return assets
+
+    def get_condition_assets(self, condition_id: str) -> list[Asset]:
+        """Get all assets assigned to a condition"""
+        key = _condition_asset_key(condition_id)
+        cached = self._cache_get(key)
+        if cached is not None:
+            return [Asset.model_validate(asset) for asset in cached]
+        assets = list(
+            self.session.exec(
+                select(Asset)
+                .join(Condition)
+                .where(Condition.condition_id == condition_id)
+            ).all()
+        )
+        if assets:
+            self._cache_set(
+                key,
+                [asset.model_dump(mode="json") for asset in assets],
+                _TTL_CONDITION_ASSETS,
             )
         return assets
 

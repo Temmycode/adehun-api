@@ -1,11 +1,38 @@
 import logging
 from typing import Any
 
+from redis import Redis
 from sqlmodel import Session, select
 
 from app.models import Agreement, AgreementParticipant, Condition, Invitation, User
+from app.redis import RedisClient
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# TTL constants (seconds)
+# ---------------------------------------------------------------------------
+_TTL_USER_AGREEMENTS = 60 * 5  # 5 minutes – cache TTL
+_TTL_AGREEMENTS = 60 * 5  # 5 minutes – cache TTL
+_NONE_SENTINEL = "__none__"
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _agreement_key(agreement_id: str) -> str:
+    return f"agreement:{agreement_id}"
+
+
+def _agreement_participant_key(agreement_id: str, participant_id: str) -> str:
+    return f"agreement:{agreement_id}:participant:{participant_id}"
+
+
+def _user_agreements_key(user_id: str) -> str:
+    return f"user:{user_id}:agreements"
 
 
 # ---------------------------------------------------------------------------
@@ -13,9 +40,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class AgreementRepository:
-    def __init__(self, session: Session):
+class AgreementRepository(RedisClient):
+    def __init__(self, session: Session, redis_client: Redis | None):
         self.session = session
+        super().__init__(redis_client)
 
     # ------------------------------------------------------------------ #
     #  Agreement Operations                                              #
@@ -30,6 +58,11 @@ class AgreementRepository:
 
     def get_user_agreements(self, user_id: str) -> list[Agreement]:
         """Return a list of agreements for the given user ID."""
+        key = _user_agreements_key(user_id)
+        cached = self._cache_get(key)
+        if cached is not None:
+            logger.debug("Returning agreements for user id=%d", user_id)
+            return [Agreement.model_validate(agreement) for agreement in cached]
 
         agreements = self.session.exec(
             select(Agreement)
@@ -37,13 +70,27 @@ class AgreementRepository:
             .where(AgreementParticipant.user_id == user_id)
         ).all()
 
+        if agreements:
+            self._cache_set(
+                key,
+                [agreement.model_dump(mode="json") for agreement in agreements],
+                _TTL_USER_AGREEMENTS,
+            )
         return list(agreements)
 
     def get_by_id(self, agreement_id: str) -> Agreement | None:
         """Return an agreement by its ID."""
-        return self.session.exec(
+        key = _agreement_key(agreement_id)
+        cached = self._cache_get(key)
+        if cached is not None:
+            logger.debug("Returning agreement id=%d", agreement_id)
+            return Agreement.model_validate(cached)
+
+        agreement = self.session.exec(
             select(Agreement).where(Agreement.agreement_id == agreement_id)
         ).first()
+        self._cache_set(key, agreement, _TTL_AGREEMENTS)
+        return agreement
 
     def get_user_by_email_or_phone(self, email_or_phone: str) -> User | None:
         """Return a user by their email or phone."""

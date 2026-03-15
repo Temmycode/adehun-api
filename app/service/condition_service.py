@@ -15,34 +15,12 @@ from app.schemas.conditions_schema import ConditionCreate, ConditionResponse
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# TTL constants (seconds)
-# ---------------------------------------------------------------------------
-_TTL_LIST = 60 * 5  # 5 min   – list/collection keys
-_TTL_AGREEMENT_CONDITIONS = 60 * 60 * 24  # 24 hours – cache TTL
-_TTL_CONDITION = 60 * 60 * 24  # 24 hours – cache TTL
-_NONE_SENTINEL = "__none__"
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _condition_key(condition_id: str) -> str:
-    return f"condition:{condition_id}"
-
-
-def _agreement_condition(agreement_id: str) -> str:
-    return f"agreement:{agreement_id}:condition"
-
 
 # ---------------------------------------------------------------------------
 # Service
 # ---------------------------------------------------------------------------
 class ConditionService(RedisClient):
-    def __init__(self, condition_repo: ConditionRepository, redis_client: Redis | None):
-        super().__init__(redis_client)
+    def __init__(self, condition_repo: ConditionRepository):
         self.condition_repo = condition_repo
 
     def add_condition(
@@ -88,6 +66,14 @@ class ConditionService(RedisClient):
         )
         try:
             self.condition_repo.save_condition(condition)
+
+            # INFO: Invalidate user cache and agreement cache
+
+            self._cache_delete(
+                _agreement_key(agreement_id),
+                _user_agreements_key(user_id),
+                _agreement_condition(agreement_id),
+            )
             return ConditionResponse.model_validate(
                 self.condition_repo.get_by_id(agreement_id, condition.condition_id)
             )
@@ -116,6 +102,14 @@ class ConditionService(RedisClient):
         condition.approved_at = datetime.now(timezone.utc)
         condition.status = "approved"
         self.condition_repo.save_condition(condition)
+
+        # INFO: Invalidate agreement cache
+        self._cache_delete(
+            _user_agreements_key(user_id),
+            _agreement_key(agreement_id),
+            _agreement_condition(agreement_id),
+            _condition_key(condition_id),
+        )
         return ConditionResponse.model_validate(condition)
 
     def reject_condition(
@@ -138,24 +132,24 @@ class ConditionService(RedisClient):
         condition.rejected_reason = rejected_reason
         condition.status = "rejected"
         self.condition_repo.save_condition(condition)
+
+        # INFO: Invalidate agreement cache
+        self._cache_delete(
+            _user_agreements_key(user_id),
+            _agreement_key(agreement_id),
+            _agreement_condition(agreement_id),
+            _condition_key(condition_id),
+        )
         return ConditionResponse.model_validate(condition)
 
     def get_condition(self, agreement_id: str, condition_id: str) -> ConditionResponse:
-        key = _condition_key(condition_id)
-        cached = self._cache_get(key)
-        if cached is not None:
-            return ConditionResponse.model_validate(cached)
-
         db_condition = self.condition_repo.get_by_id(agreement_id, condition_id)
 
         if not db_condition:
             logger.exception("Condition not found for condition_id=%s", condition_id)
             raise ConditionNotFoundError()
 
-        condition = ConditionResponse.model_validate(db_condition)
-        self._cache_set(key, condition, _TTL_CONDITION)
-
-        return condition
+        return ConditionResponse.model_validate(db_condition)
 
     def get_agreement_conditions(self, agreement_id: str) -> list[ConditionResponse]:
         key = _agreement_condition(agreement_id)

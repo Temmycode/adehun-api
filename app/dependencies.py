@@ -46,8 +46,10 @@ def get_auth_service(user_repo: UserRepositoryDep):
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 
 
-def get_agreement_repository(session: SessionDep) -> AgreementRepository:
-    return AgreementRepository(session)
+def get_agreement_repository(
+    session: SessionDep, redis_client: RedisDep
+) -> AgreementRepository:
+    return AgreementRepository(session, redis_client)
 
 
 AgreementRepositoryDep = Annotated[
@@ -78,10 +80,8 @@ def get_asset_service(repo: AssetRepositoryDep) -> AssetService:
 AssetServiceDep = Annotated[AssetService, Depends(get_asset_service)]
 
 
-def get_agreement_service(
-    agreement_repo: AgreementRepositoryDep, redis_client: RedisDep
-) -> AgreementService:
-    return AgreementService(agreement_repo, redis_client)
+def get_agreement_service(agreement_repo: AgreementRepositoryDep) -> AgreementService:
+    return AgreementService(agreement_repo)
 
 
 AgreementServiceDep = Annotated[AgreementService, Depends(get_agreement_service)]
