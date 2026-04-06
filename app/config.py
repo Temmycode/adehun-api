@@ -19,8 +19,8 @@ class Settings(BaseSettings):
     redis_database_host: str
     redis_database_password: str
     redis_database_port: str
-    resend_api_key: str
-    google_application_credentials: str
+    resend_api_key: str | None = None
+    google_application_credentials: str | None = None
     frontend_url: str
     debug: bool = True
 

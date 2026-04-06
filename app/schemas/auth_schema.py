@@ -6,6 +6,7 @@ from app.schemas.user_schema import UserResponse
 class LoginResponse(BaseModel):
     access_token: str
     refresh_token: str
+    is_signed_up: bool | None = True
     user: UserResponse
 
 

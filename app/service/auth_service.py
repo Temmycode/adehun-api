@@ -3,7 +3,7 @@ import logging
 from firebase_admin import auth
 
 from app import token_service
-from app.exceptions import UserNotFound
+from app.exceptions import InvitationNotFoundError, UserNotFound
 from app.models import User
 from app.repository.user_repository import UserRepository
 from app.schemas.agreement_schema import InvitationResponse
@@ -48,11 +48,15 @@ class AuthService:
 
     def verify_invitation(self, invitation_token: str) -> dict:
         """Verify the invitation token and return the user email"""
+        if not self.user_repo.redis_client:
+            raise InvitationNotFoundError()
 
         return validate_token(self.user_repo.redis_client, invitation_token)
 
     def verify_id_token(self, id_token: str) -> LoginResponse:
         """Verify the ID token and return a LoginResponse object."""
+
+        is_signed_up = False
 
         # Verify the ID token using Firebase Admin SDK
         decoded_token = auth.verify_id_token(id_token)
@@ -70,6 +74,8 @@ class AuthService:
         if not user:
             # create a new user
             user = self._create_user(user_id)
+        else:
+            is_signed_up = True
 
         # Create tokens for user
         access_token = token_service.create_token(user_id, "access")
@@ -79,6 +85,7 @@ class AuthService:
         response = LoginResponse(
             access_token=access_token,
             refresh_token=refresh_token,
+            is_signed_up=is_signed_up,
             user=user,  # pyright: ignore[reportArgumentType]
         )
 

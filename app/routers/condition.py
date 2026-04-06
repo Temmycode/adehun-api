@@ -13,10 +13,10 @@ from app.schemas.conditions_schema import (
     ConditionResponse,
 )
 
-router = APIRouter(prefix="/agreements", tags=["Conditions"])
+router = APIRouter(tags=["Conditions"])
 
 
-@router.post("/{agreement_id}/conditions", response_model=ConditionResponse)
+@router.post("/agreements/{agreement_id}/conditions", response_model=ConditionResponse)
 @limiter.limit("5/minute")
 async def add_condition_to_agreement(
     request: Request,
@@ -50,7 +50,9 @@ async def add_condition_to_agreement(
         raise HTTPException(status_code=500, detail=e.message)
 
 
-@router.get("/{agreement_id}/conditions", response_model=list[ConditionResponse])
+@router.get(
+    "/agreements/{agreement_id}/conditions", response_model=list[ConditionResponse]
+)
 @limiter.limit("10/minute")
 async def get_conditions_for_agreement(
     request: Request,
@@ -72,7 +74,8 @@ async def get_conditions_for_agreement(
 
 
 @router.get(
-    "/{agreement_id}/conditions/{condition_id}", response_model=ConditionResponse
+    "/conditions/{condition_id}",
+    response_model=ConditionResponse,
 )
 @limiter.limit("10/minute")
 async def get_condition_details(
@@ -95,10 +98,7 @@ async def get_condition_details(
         raise HTTPException(status_code=404, detail=e.message)
 
 
-@router.post(
-    "/{agreement_id}/conditions/{condition_id}/approve",
-    response_model=ConditionResponse,
-)
+@router.post("/conditions/{condition_id}/approve", response_model=ConditionResponse)
 @limiter.limit("10/minute")
 async def approve_condition(
     request: Request,
@@ -125,7 +125,7 @@ async def approve_condition(
 
 
 @router.post(
-    "/{agreement_id}/conditions/{condition_id}/reject",
+    "/conditions/{condition_id}/reject",
     response_model=ConditionResponse,
 )
 @limiter.limit("10/minute")

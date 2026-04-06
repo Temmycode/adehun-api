@@ -16,6 +16,10 @@ from app.service.image_upload_service import create_upload_signature
 logger = logging.getLogger(__name__)
 
 
+def _condition_asset_key(condition_id: str) -> str:
+    return f"condition:{condition_id}:asset"
+
+
 class AssetService:
     def __init__(self, asset_repo: AssetRepository):
         self.asset_repo = asset_repo
@@ -67,6 +71,9 @@ class AssetService:
 
             self.asset_repo.add_and_flush(*assets)
             self.asset_repo.commit()
+
+            # Invalidate the cache
+            self.asset_repo.invalidate_cache(_condition_asset_key(condition_id))
 
             # fetch the data
             assets = self.asset_repo.get_assets_by_ids(

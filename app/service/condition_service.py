@@ -1,7 +1,6 @@
 import logging
 from datetime import datetime, timezone
 
-from redis import Redis
 
 from app.exceptions import (
     ConditionNotFoundError,
@@ -14,6 +13,14 @@ from app.repository.condition_repository import ConditionRepository
 from app.schemas.conditions_schema import ConditionCreate, ConditionResponse
 
 logger = logging.getLogger(__name__)
+
+
+def _agreement_condition(agreement_id: str) -> str:
+    return f"agreement:{agreement_id}:condition"
+
+
+def _condition_key(condition_id: str) -> str:
+    return f"condition:{condition_id}"
 
 
 # ---------------------------------------------------------------------------
@@ -57,21 +64,22 @@ class ConditionService(RedisClient):
             agreement_id=agreement_id,
             participant_id=current_participant.participant_id,
             **condition_data.model_dump(mode="json"),
-            required_from_participant_id=other_participant_or_invitation.participant_id
-            if isinstance(other_participant_or_invitation, AgreementParticipant)
-            else None,
-            invitation_id=other_participant_or_invitation.invitation_id
-            if isinstance(other_participant_or_invitation, Invitation)
-            else None,
+            required_from_participant_id=(
+                other_participant_or_invitation.participant_id
+                if isinstance(other_participant_or_invitation, AgreementParticipant)
+                else None
+            ),
+            invitation_id=(
+                other_participant_or_invitation.invitation_id
+                if isinstance(other_participant_or_invitation, Invitation)
+                else None
+            ),
         )
         try:
             self.condition_repo.save_condition(condition)
 
-            # INFO: Invalidate user cache and agreement cache
-
+            # INFO: Invalidate agreement cache
             self._cache_delete(
-                _agreement_key(agreement_id),
-                _user_agreements_key(user_id),
                 _agreement_condition(agreement_id),
             )
             return ConditionResponse.model_validate(
@@ -103,10 +111,8 @@ class ConditionService(RedisClient):
         condition.status = "approved"
         self.condition_repo.save_condition(condition)
 
-        # INFO: Invalidate agreement cache
+        # INFO: Invalidate condition cache
         self._cache_delete(
-            _user_agreements_key(user_id),
-            _agreement_key(agreement_id),
             _agreement_condition(agreement_id),
             _condition_key(condition_id),
         )
@@ -134,9 +140,7 @@ class ConditionService(RedisClient):
         self.condition_repo.save_condition(condition)
 
         # INFO: Invalidate agreement cache
-        self._cache_delete(
-            _user_agreements_key(user_id),
-            _agreement_key(agreement_id),
+        self.condition_repo._cache_delete(
             _agreement_condition(agreement_id),
             _condition_key(condition_id),
         )
@@ -152,23 +156,6 @@ class ConditionService(RedisClient):
         return ConditionResponse.model_validate(db_condition)
 
     def get_agreement_conditions(self, agreement_id: str) -> list[ConditionResponse]:
-        key = _agreement_condition(agreement_id)
-        cached = self._cache_get(key)
-        if cached:
-            return [ConditionResponse.model_validate(condition) for condition in cached]
+        conditions = self.condition_repo.get_agreement_condition(agreement_id)
 
-        db_conditions = self.condition_repo.get_agreement_condition(agreement_id)
-        if not db_conditions:
-            logger.exception("Conditions not found for agreement_id=%s", agreement_id)
-            raise ConditionNotFoundError()
-
-        conditions = [
-            ConditionResponse.model_validate(condition) for condition in db_conditions
-        ]
-        self._cache_set(
-            key,
-            [condition.model_dump(mode="json") for condition in conditions],
-            _TTL_CONDITION,
-        )
-
-        return conditions
+        return [ConditionResponse.model_validate(condition) for condition in conditions]

@@ -21,16 +21,8 @@ _NONE_SENTINEL = "__none__"
 # ---------------------------------------------------------------------------
 
 
-def _agreement_key(agreement_id: str) -> str:
-    return f"agreement:{agreement_id}"
-
-
 def _condition_key(condition_id: str) -> str:
     return f"condition:{condition_id}"
-
-
-def _user_agreements_key(user_id: str) -> str:
-    return f"user:{user_id}:agreements"
 
 
 def _agreement_condition(agreement_id: str) -> str:
@@ -57,9 +49,25 @@ class ConditionRepository(RedisClient):
 
     def get_agreement_condition(self, agreement_id: str) -> list[Condition]:
         """Return a list of agreements for the given user ID."""
-        conditions = self.session.exec(
+        key = _agreement_condition(agreement_id)
+        cached = self._cache_get(key)
+        if cached:
+            return [Condition.model_validate(condition) for condition in cached]
+
+        db_conditions = self.session.exec(
             select(Condition).where(Condition.agreement_id == agreement_id)
         ).all()
+        conditions = [
+            Condition.model_validate(condition) for condition in db_conditions
+        ]
+
+        if db_conditions:
+            self._cache_set(
+                key,
+                [condition.model_dump(mode="json") for condition in conditions],
+                _TTL_AGREEMENT_CONDITIONS,
+            )
+
         return list(conditions)
 
     def get_by_id(self, agreement_id: str, condition_id: str) -> Condition | None:

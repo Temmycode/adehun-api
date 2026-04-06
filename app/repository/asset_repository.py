@@ -44,6 +44,14 @@ class AssetRepository(RedisClient):
         self.session = session
 
     # ------------------------------------------------------------------ #
+    #  Helper Functions                                                  #
+    # ------------------------------------------------------------------ #
+
+    def invalidate_cache(self, key: str) -> None:
+        if self.redis_client is not None:
+            self.redis_client.delete(key)
+
+    # ------------------------------------------------------------------ #
     #  Asset Operations                                                  #
     # ------------------------------------------------------------------ #
 

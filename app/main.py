@@ -1,3 +1,4 @@
+import json
 import logging
 from contextlib import asynccontextmanager
 
@@ -43,8 +44,11 @@ cloudinary.config(
 origins = ["*"]
 
 # Firebase Admin SDK initialization
-cred = credentials.Certificate(settings.google_application_credentials)
-firebase_admin.initialize_app()
+with open("./secrets/firebase.json") as account_file:
+    service_account = json.load(account_file)
+
+cred = credentials.Certificate(service_account)
+firebase_admin.initialize_app(cred)
 
 app = FastAPI(title="Adehun API", version="1.0.0", lifespan=lifespan)
 app.state.limiter = limiter
