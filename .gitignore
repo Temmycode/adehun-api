@@ -5,6 +5,7 @@ __pycache__/
 
 # .firebase
 firebase-service-account.json
+firebase.json
 
 # C extensions
 *.so
