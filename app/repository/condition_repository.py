@@ -25,8 +25,8 @@ def _condition_key(condition_id: str) -> str:
     return f"condition:{condition_id}"
 
 
-def _agreement_condition(agreement_id: str) -> str:
-    return f"agreement:{agreement_id}:condition"
+def _agreement_condition(user_id: str) -> str:
+    return f"agreement:condition:user:{user_id}"
 
 
 # ---------------------------------------------------------------------------
@@ -47,15 +47,17 @@ class ConditionRepository(RedisClient):
         self.session.flush()
         return condition
 
-    def get_agreement_condition(self, agreement_id: str) -> list[Condition]:
+    def get_agreement_condition(
+        self, agreement_ids: list[str], user_id: str
+    ) -> list[Condition]:
         """Return a list of agreements for the given user ID."""
-        key = _agreement_condition(agreement_id)
+        key = _agreement_condition(user_id)
         cached = self._cache_get(key)
         if cached:
             return [Condition.model_validate(condition) for condition in cached]
 
         db_conditions = self.session.exec(
-            select(Condition).where(Condition.agreement_id == agreement_id)
+            select(Condition).where(Condition.agreement_id.in_(agreement_ids))  # pyright: ignore[reportAttributeAccessIssue]
         ).all()
         conditions = [
             Condition.model_validate(condition) for condition in db_conditions

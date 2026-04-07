@@ -1,7 +1,6 @@
 import logging
 from datetime import datetime, timezone
 
-
 from app.exceptions import (
     ConditionNotFoundError,
     ConditionSaveError,
@@ -10,7 +9,11 @@ from app.exceptions import (
 from app.models import AgreementParticipant, Condition, Invitation
 from app.redis import RedisClient
 from app.repository.condition_repository import ConditionRepository
-from app.schemas.conditions_schema import ConditionCreate, ConditionResponse
+from app.schemas.conditions_schema import (
+    BatchConditionResponse,
+    ConditionCreate,
+    ConditionResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +158,11 @@ class ConditionService(RedisClient):
 
         return ConditionResponse.model_validate(db_condition)
 
-    def get_agreement_conditions(self, agreement_id: str) -> list[ConditionResponse]:
-        conditions = self.condition_repo.get_agreement_condition(agreement_id)
+    def get_agreement_conditions(
+        self, agreement_ids: list[str], user_id: str
+    ) -> list[BatchConditionResponse]:
+        conditions = self.condition_repo.get_agreement_condition(agreement_ids, user_id)
 
-        return [ConditionResponse.model_validate(condition) for condition in conditions]
+        return [
+            BatchConditionResponse.model_validate(condition) for condition in conditions
+        ]

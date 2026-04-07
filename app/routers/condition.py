@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.dependencies import ActiveUserDep, ConditionServiceDep
 from app.exceptions import (
@@ -8,6 +8,7 @@ from app.exceptions import (
 )
 from app.rate_limiting import limiter
 from app.schemas.conditions_schema import (
+    BatchConditionResponse,
     ConditionCreate,
     ConditionReject,
     ConditionResponse,
@@ -50,15 +51,13 @@ async def add_condition_to_agreement(
         raise HTTPException(status_code=500, detail=e.message)
 
 
-@router.get(
-    "/agreements/{agreement_id}/conditions", response_model=list[ConditionResponse]
-)
+@router.get("/conditions", response_model=list[BatchConditionResponse])
 @limiter.limit("10/minute")
-async def get_conditions_for_agreement(
+async def get_agreements_conditions(
     request: Request,
-    agreement_id: str,
-    _: ActiveUserDep,
+    current_user: ActiveUserDep,
     condition_service: ConditionServiceDep,
+    agreement_ids: list[str] = Query(...),
 ):
     """
     Get conditions for a given agreement.
@@ -68,7 +67,9 @@ async def get_conditions_for_agreement(
     """
 
     try:
-        return condition_service.get_agreement_conditions(agreement_id)
+        return condition_service.get_agreement_conditions(
+            agreement_ids, current_user.user_id
+        )
     except ConditionNotFoundError as e:
         raise HTTPException(status_code=404, detail=e.message)
 

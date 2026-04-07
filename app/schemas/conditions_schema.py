@@ -28,5 +28,11 @@ class ConditionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class BatchConditionResponse(ConditionResponse):
+    agreement_id: str
+
+    model_config = {"from_attributes": True}
+
+
 class ConditionReject(BaseModel):
     rejected_reason: str
