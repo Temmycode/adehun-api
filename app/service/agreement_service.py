@@ -15,6 +15,7 @@ from app.schemas.agreement_schema import (
     AgreementResponse,
     InvitationResponse,
 )
+from app.schemas.participant_schema import ParticipantResponse
 
 from ..service.invitation_service import (
     get_invitation_token,
@@ -61,9 +62,14 @@ class AgreementService:
         #     email,
         #     invitation_link,
         # )
-        logger.debug(
-            "Invite participant succeeded",
-            extra={"email": email},
+        logger.info(
+            "participant invited",
+            extra={
+                "email": email,
+                "role": role,
+                "agreement_id": agreement.id,
+                "creator_id": creator_id,
+            },
         )
 
     def create_agreement(
@@ -79,13 +85,14 @@ class AgreementService:
                     title=agreement_data.title,
                     description=agreement_data.description,
                     amount=agreement_data.amount,
+                    user_id=current_user_id,
                 )
             )
 
             # create agreement participants
             creator = AgreementParticipant(
                 user_id=current_user_id,
-                agreement_id=agreement.agreement_id,
+                agreement_id=agreement.id,
                 role=agreement_data.role,
                 status=InvitationStatus.ACCEPTED.value,
             )
@@ -104,10 +111,13 @@ class AgreementService:
             self.agreement_repo.commit()
 
             return AgreementResponse.model_validate(
-                self.agreement_repo.get_by_id(agreement.agreement_id)
+                self.agreement_repo.get_by_id(agreement.id)
             )
         except Exception as err:
-            logger.exception("Failed to save agreement")
+            logger.exception(
+                "failed to create agreement",
+                extra={"user_id": current_user_id, "title": agreement_data.title},
+            )
             self.agreement_repo.rollback()
             raise AgreementCreationError() from err
 
@@ -123,9 +133,33 @@ class AgreementService:
         """Get all agreements for a user"""
 
         db_agreements = self.agreement_repo.get_user_agreements(user_id)
-        return [
-            AgreementResponse.model_validate(agreement) for agreement in db_agreements
-        ]
+        return [self._to_agreement_response(a) for a in db_agreements]
+
+    @staticmethod
+    def _to_agreement_response(agreement: Agreement) -> AgreementResponse:
+        """Map an Agreement (with loaded participants) to AgreementResponse."""
+        depositor: AgreementParticipant | None = None
+        beneficiary: AgreementParticipant | None = None
+        for p in agreement.participants:
+            if p.role == "depositor":
+                depositor = p
+            elif p.role == "beneficiary":
+                beneficiary = p
+
+        return AgreementResponse(
+            id=agreement.id,
+            title=agreement.title,
+            description=agreement.description,
+            amount=agreement.amount,
+            status=agreement.status,
+            depositor=ParticipantResponse.model_validate(depositor)
+            if depositor
+            else None,
+            beneficiary=ParticipantResponse.model_validate(beneficiary)
+            if beneficiary
+            else None,
+            created_at=agreement.created_at,
+        )
 
     def accept_agreement(
         self, agreement_id: str, user_id: str, email: str
@@ -148,7 +182,7 @@ class AgreementService:
 
         # Update the conditions that have the users email to use the participant's id
         self.agreement_repo.update_agreement_conditions_with_invitation(
-            agreement_id, invitation.invitation_id, new_participant.participant_id
+            agreement_id, invitation.id, new_participant.id
         )
 
         # fetch the new agreement data

@@ -25,10 +25,22 @@ def get_redis_client() -> Redis | None:
                 password=settings.redis_database_password,
             )
             _redis_client.ping()
-            logger.info("Redis client initialized")
+            logger.info(
+                "redis client initialized",
+                extra={
+                    "host": settings.redis_database_host,
+                    "port": settings.redis_database_port,
+                },
+            )
         except Exception:
             _redis_client = None
-            logger.exception("Failed to initialize Redis client")
+            logger.exception(
+                "failed to initialize redis client",
+                extra={
+                    "host": settings.redis_database_host,
+                    "port": settings.redis_database_port,
+                },
+            )
 
     return _redis_client
 
@@ -57,13 +69,15 @@ class RedisClient:
         try:
             raw = self.redis_client.get(key)
             if raw is None:
-                logger.debug("Cache MISS  key=%s", key)
+                logger.debug("cache miss", extra={"key": key})
                 return None
-            logger.debug("Cache HIT   key=%s", key)
+            logger.debug("cache hit", extra={"key": key})
             return json.loads(raw)  # pyright: ignore[reportArgumentType]
         except Exception:
             logger.warning(
-                "Redis GET failed for key=%s — falling back to DB", key, exc_info=True
+                "redis GET failed, falling back to db",
+                extra={"key": key},
+                exc_info=True,
             )
             return None
 
@@ -73,7 +87,7 @@ class RedisClient:
         try:
             self.redis_client.setex(key, ttl, self._serialize(value))
         except Exception:
-            logger.warning("Redis SET failed for key=%s", key, exc_info=True)
+            logger.warning("redis SET failed", extra={"key": key}, exc_info=True)
 
     def _cache_delete(self, *keys: str):
         """Delete one or more cache keys (best-effort)."""
@@ -81,6 +95,6 @@ class RedisClient:
             return None
         try:
             self.redis_client.delete(*keys)
-            logger.debug("Cache DEL   keys=%s", keys)
+            logger.debug("cache delete", extra={"keys": keys})
         except Exception:
-            logger.warning("Redis DEL failed for keys=%s", keys, exc_info=True)
+            logger.warning("redis DEL failed", extra={"keys": keys}, exc_info=True)

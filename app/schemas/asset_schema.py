@@ -5,14 +5,14 @@ from pydantic import BaseModel
 from app.schemas.participant_schema import ParticipantResponse
 
 
-@dataclass
+@dataclass(frozen=True)
 class AssetFile:
     url: str
     type: str
 
 
 class AssetFileResponse(BaseModel):
-    file_id: str
+    id: str
     url: str
     type: str
 
@@ -20,7 +20,7 @@ class AssetFileResponse(BaseModel):
 
 
 class AssetResponse(BaseModel):
-    asset_id: str
+    id: str
     uploader: ParticipantResponse
     is_approved: bool = False
     file: AssetFileResponse

@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 
 class ConditionInvitationResponse(BaseModel):
-    invitation_id: str
+    id: str
     email: str
     role: str
     status: str

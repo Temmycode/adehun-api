@@ -11,12 +11,12 @@ if TYPE_CHECKING:
 
 
 class Invitation(SQLModel, table=True):
-    invitation_id: str = Field(primary_key=True, default_factory=lambda: str(uuid4()))
+    id: str = Field(primary_key=True, default_factory=lambda: str(uuid4()))
     email: str
     token: str
-    agreement_id: str = Field(foreign_key="agreement.agreement_id")
+    agreement_id: str = Field(foreign_key="agreement.id")
     role: str
-    invited_by: str = Field(foreign_key="user.user_id")
+    invited_by: str = Field(foreign_key="user.id")
     status: str | None = Field(default="pending")  # pending, accepted, expired
     expires_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc) + timedelta(days=7)

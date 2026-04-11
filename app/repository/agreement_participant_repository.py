@@ -61,7 +61,7 @@ class AgreementParticipantRepository(RedisClient):
 
         asset = self.session.exec(
             select(AgreementParticipant).where(
-                AgreementParticipant.participant_id == participant_id
+                AgreementParticipant.id == participant_id
             )
         ).first()
         if asset:
@@ -84,9 +84,9 @@ class AgreementParticipantRepository(RedisClient):
                 select(AgreementParticipant)
                 .join(
                     Agreement,
-                    AgreementParticipant.agreement_id == Agreement.agreement_id,  # pyright: ignore[reportArgumentType]
+                    AgreementParticipant.agreement_id == Agreement.id,  # pyright: ignore[reportArgumentType]
                 )
-                .where(Agreement.agreement_id == agreement_id)
+                .where(Agreement.id == agreement_id)
             )
         )
 

@@ -6,7 +6,6 @@ from app import token_service
 from app.exceptions import InvitationNotFoundError, UserNotFound
 from app.models import User
 from app.repository.user_repository import UserRepository
-from app.schemas.agreement_schema import InvitationResponse
 from app.schemas.auth_schema import LoginResponse, UserCreateRequest
 from app.schemas.user_schema import UserResponse
 
@@ -27,6 +26,7 @@ class AuthService:
 
         # Create internal user model
         user = User(
+            id=user_id,
             email=firebase_user.email,
             name=firebase_user.display_name,
             profile_picture_url=firebase_user.photo_url,
@@ -40,8 +40,9 @@ class AuthService:
             register_data.user_id, register_data.phone_number, register_data.name
         )
         if not user:
-            logger.exception(
-                "Register failed: user not found id=%s", register_data.user_id
+            logger.error(
+                "registration failed, user not found",
+                extra={"user_id": register_data.user_id},
             )
             raise UserNotFound()
         return UserResponse.model_validate(user)

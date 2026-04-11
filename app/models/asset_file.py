@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 class AssetFile(SQLModel, table=True):
     __tablename__ = "asset_file"  # pyright: ignore[reportAssignmentType]
 
-    file_id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     url: str
     type: str  # image/pdf/zip/video/link
 

@@ -29,7 +29,10 @@ class AssetService:
         try:
             return create_upload_signature("adehun/assets")
         except Exception as e:
-            logger.exception("Failed to create asset signature: %s", str(e))
+            logger.exception(
+                "failed to create asset upload signature",
+                extra={"condition_id": condition_id, "error": str(e)},
+            )
             raise AssetUploadError() from e
 
     def add_asset_to_condition(
@@ -39,8 +42,9 @@ class AssetService:
         try:
             condition = self.asset_repo.get_condition(condition_id)
             if not condition:
-                logger.exception(
-                    "Condition not found for condition_id: %s", condition_id
+                logger.error(
+                    "condition not found for asset upload",
+                    extra={"condition_id": condition_id, "user_id": user_id},
                 )
                 raise ConditionNotFoundError()
 
@@ -48,10 +52,13 @@ class AssetService:
                 user_id, condition.agreement_id
             )
             if not participant:
-                logger.exception(
-                    "Participant not found for user_id: %s, agreement_id: %s",
-                    user_id,
-                    condition.agreement_id,
+                logger.error(
+                    "participant not found for asset upload",
+                    extra={
+                        "user_id": user_id,
+                        "agreement_id": condition.agreement_id,
+                        "condition_id": condition_id,
+                    },
                 )
                 raise PermissionError("User is not a participant of this agreement")
 
@@ -63,8 +70,8 @@ class AssetService:
             assets = [
                 Asset(
                     condition_id=condition_id,
-                    file_id=file.file_id,
-                    uploaded_by=participant.participant_id,
+                    file_id=file.id,
+                    uploaded_by=participant.id,
                 )
                 for file in files
             ]
@@ -77,39 +84,71 @@ class AssetService:
 
             # fetch the data
             assets = self.asset_repo.get_assets_by_ids(
-                [asset.asset_id for asset in assets]
+                [asset.id for asset in assets]
+            )
+            logger.info(
+                "assets uploaded",
+                extra={
+                    "condition_id": condition_id,
+                    "user_id": user_id,
+                    "count": len(assets),
+                },
             )
             return [AssetResponse.model_validate(asset) for asset in assets]
+        except (ConditionNotFoundError, PermissionError):
+            raise
         except Exception as e:
-            logger.exception("Failed to upload asset: %s", str(e))
+            logger.exception(
+                "failed to upload assets",
+                extra={
+                    "condition_id": condition_id,
+                    "user_id": user_id,
+                    "error": str(e),
+                },
+            )
             self.asset_repo.rollback()
             raise AssetUploadError() from e
 
     def get_assets_for_condition(self, condition_id: str) -> list[AssetResponse]:
         """Get assets for a condition"""
         try:
-            # check if condition exists
             condition = self.asset_repo.get_condition(condition_id)
             if not condition:
+                logger.error(
+                    "condition not found when fetching assets",
+                    extra={"condition_id": condition_id},
+                )
                 raise ConditionNotFoundError()
 
             assets = self.asset_repo.get_condition_assets(condition_id)
             return [AssetResponse.model_validate(asset) for asset in assets]
+        except ConditionNotFoundError:
+            raise
         except Exception as e:
-            logger.exception("Failed to get assets for condition: %s", str(e))
+            logger.exception(
+                "failed to fetch condition assets",
+                extra={"condition_id": condition_id, "error": str(e)},
+            )
             raise AssetRetrievalError() from e
 
     def get_assets_for_agreement(self, agreement_id: str) -> list[AssetResponse]:
         """Get assets for an agreement"""
-
         try:
-            # check if agreement exists
             agreement = self.asset_repo.get_agreement(agreement_id)
             if not agreement:
+                logger.error(
+                    "agreement not found when fetching assets",
+                    extra={"agreement_id": agreement_id},
+                )
                 raise AgreementNotFoundError()
 
             assets = self.asset_repo.get_agreement_assets(agreement_id)
             return [AssetResponse.model_validate(asset) for asset in assets]
+        except AgreementNotFoundError:
+            raise
         except Exception as e:
-            logger.exception("Failed to get assets for agreement: %s", str(e))
+            logger.exception(
+                "failed to fetch agreement assets",
+                extra={"agreement_id": agreement_id, "error": str(e)},
+            )
             raise AssetRetrievalError from e

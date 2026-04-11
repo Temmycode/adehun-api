@@ -6,11 +6,26 @@ from app.exceptions import (
     AgreementCreationError,
     AgreementNotFoundError,
 )
-from app.models import Agreement
 from app.rate_limiting import limiter
 from app.schemas.agreement_schema import AgreementCreate, AgreementResponse
 
 router = APIRouter(prefix="/agreements", tags=["Agreements"])
+
+
+@router.get("/", response_model=list[AgreementResponse])
+@limiter.limit("10/minute")
+async def get_all_user_agreements(
+    request: Request,
+    current_user: ActiveUserDep,
+    agreement_service: AgreementServiceDep,
+) -> list[AgreementResponse]:
+    """
+    Get all agreements for the authenticated user.
+    """
+    try:
+        return agreement_service.get_all_user_agreements(current_user.id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/", status_code=201, response_model=AgreementResponse)
@@ -30,28 +45,12 @@ async def create_agreement(
     """
     try:
         return agreement_service.create_agreement(
-            current_user.user_id,
+            current_user.id,
             agreement_data,
             background_tasks,
         )
     except AgreementCreationError as e:
         raise HTTPException(status_code=500, detail=e.message)
-
-
-@router.get("/", response_model=list[AgreementResponse])
-@limiter.limit("10/minute")
-async def get_all_user_agreements(
-    request: Request,
-    current_user: ActiveUserDep,
-    agreement_service: AgreementServiceDep,
-) -> list[AgreementResponse]:
-    """
-    Get all agreements for the authenticated user.
-    """
-    try:
-        return agreement_service.get_all_user_agreements(current_user.user_id)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/{agreement_id}/", response_model=AgreementResponse)
@@ -67,7 +66,7 @@ async def accept_agreement(
     """
     try:
         return agreement_service.accept_agreement(
-            agreement_id, current_user.user_id, current_user.email
+            agreement_id, current_user.id, current_user.email
         )
     except AgreementAcceptanceError as e:
         raise HTTPException(status_code=500, detail=e.message)

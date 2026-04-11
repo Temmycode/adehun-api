@@ -5,12 +5,13 @@ from uuid import uuid4
 from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
+    from .agreement import Agreement
     from .agreement_participant import AgreementParticipant
     from .invitation import Invitation
 
 
 class User(SQLModel, table=True):
-    user_id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     email: str = Field(index=True, unique=True, nullable=False)
     phone_number: str | None = Field(index=True, nullable=True)
     name: str
@@ -24,3 +25,4 @@ class User(SQLModel, table=True):
     invitations: list["Invitation"] = Relationship(
         back_populates="invited_by_user", sa_relationship_kwargs={"lazy": "selectin"}
     )
+    agreements: list["Agreement"] = Relationship(back_populates="user")

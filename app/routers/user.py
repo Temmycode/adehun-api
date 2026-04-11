@@ -19,7 +19,7 @@ async def get_current_user(
     Get the current user.
     """
     try:
-        return user_service.get_user(current_user.user_id)
+        return user_service.get_user(current_user.id)
     except UserNotFound as e:
         raise HTTPException(status_code=404, detail=e.message)
 
@@ -36,6 +36,6 @@ async def update_user(
     Update the current user.
     """
     try:
-        return user_service.update_user(current_user.user_id, user_update)
+        return user_service.update_user(current_user.id, user_update)
     except UserNotFound as e:
         raise HTTPException(status_code=404, detail=e.message)

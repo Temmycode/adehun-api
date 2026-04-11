@@ -73,7 +73,6 @@ async def login(
 @limiter.limit("10/minute")
 async def refresh_token(
     request: Request,
-    _: ActiveUserDep,
     refresh_data: RefreshTokenRequest,
     auth_service: AuthServiceDep,
 ):

@@ -14,7 +14,7 @@ class ConditionCreate(BaseModel):
 
 
 class ConditionResponse(BaseModel):
-    condition_id: str
+    id: str
     title: str
     description: str
     status: str

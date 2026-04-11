@@ -47,7 +47,7 @@ async def add_asset_to_condition(
 
     try:
         return asset_service.add_asset_to_condition(
-            current_user.user_id, condition_id, asset_data
+            current_user.id, condition_id, asset_data
         )
     except ConditionNotFoundError as e:
         raise HTTPException(status_code=404, detail=e.message)

@@ -15,9 +15,9 @@ if TYPE_CHECKING:
 class AgreementParticipant(SQLModel, table=True):
     __tablename__ = "agreement_participant"  # pyright: ignore[reportAssignmentType]
 
-    participant_id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    agreement_id: str = Field(foreign_key="agreement.agreement_id")
-    user_id: str = Field(foreign_key="user.user_id")
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    agreement_id: str = Field(foreign_key="agreement.id")
+    user_id: str = Field(foreign_key="user.id")
 
     role: str = Field(default="beneficiary")  # Depositor / Beneficiary
     status: str = Field(default="invited")  # Invited / Accepted / Rejected

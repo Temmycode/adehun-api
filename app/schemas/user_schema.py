@@ -2,7 +2,7 @@ from pydantic import BaseModel
 
 
 class UserResponse(BaseModel):
-    user_id: str
+    id: str
     name: str
     email: str
     phone_number: str | None = None

@@ -3,7 +3,7 @@ import logging
 from redis import Redis
 from sqlmodel import Session, select
 
-from app.models import AgreementParticipant, Condition, Invitation, User
+from app.models import Agreement, AgreementParticipant, Condition, Invitation, User
 from app.redis import RedisClient
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,10 @@ def _agreement_condition(user_id: str) -> str:
     return f"agreement:condition:user:{user_id}"
 
 
+def _user_conditions(user_id: str) -> str:
+    return f"condition:user:{user_id}"
+
+
 # ---------------------------------------------------------------------------
 # Repository
 # ---------------------------------------------------------------------------
@@ -50,12 +54,20 @@ class ConditionRepository(RedisClient):
     def get_agreement_condition(
         self, agreement_ids: list[str], user_id: str
     ) -> list[Condition]:
-        """Return a list of agreements for the given user ID."""
+        """Return a list of conditions for the given agreement IDs."""
         key = _agreement_condition(user_id)
         cached = self._cache_get(key)
         if cached:
+            logger.debug(
+                "cache hit for agreement conditions",
+                extra={"user_id": user_id, "agreement_ids": agreement_ids},
+            )
             return [Condition.model_validate(condition) for condition in cached]
 
+        logger.debug(
+            "fetching agreement conditions from db",
+            extra={"user_id": user_id, "agreement_ids": agreement_ids},
+        )
         db_conditions = self.session.exec(
             select(Condition).where(Condition.agreement_id.in_(agreement_ids))  # pyright: ignore[reportAttributeAccessIssue]
         ).all()
@@ -63,6 +75,10 @@ class ConditionRepository(RedisClient):
             Condition.model_validate(condition) for condition in db_conditions
         ]
 
+        logger.debug(
+            "fetched agreement conditions",
+            extra={"user_id": user_id, "count": len(conditions)},
+        )
         if db_conditions:
             self._cache_set(
                 key,
@@ -72,35 +88,76 @@ class ConditionRepository(RedisClient):
 
         return list(conditions)
 
-    def get_by_id(self, agreement_id: str, condition_id: str) -> Condition | None:
-        """Return an agreement by its ID."""
+    def get_user_conditions(self, user_id: str) -> list[Condition]:
+        key = _user_conditions(user_id)
+        cached = self._cache_get(key)
+        if cached:
+            logger.debug("cache hit for user conditions", extra={"user_id": user_id})
+            return [Condition.model_validate(condition) for condition in cached]
+
+        logger.debug("fetching user conditions from db", extra={"user_id": user_id})
+        conditions = self.session.exec(
+            select(Condition)
+            .join(Agreement)
+            .join(
+                AgreementParticipant,
+                AgreementParticipant.agreement_id == Agreement.id,  # pyright: ignore[reportArgumentType]
+            )
+            .where(AgreementParticipant.user_id == user_id)
+        ).all()
+
+        self._cache_set(
+            key,
+            [condition.model_dump(mode="json") for condition in conditions],
+            _TTL_CONDITION,
+        )
+        return list(conditions)
+
+    def get_by_id(self, condition_id: str) -> Condition | None:
+        """Return a condition by its ID."""
         key = _condition_key(condition_id)
         cached = self._cache_get(key)
         if cached is not None:
+            logger.debug(
+                "cache hit for condition", extra={"condition_id": condition_id}
+            )
             return Condition.model_validate(cached)
 
-        condition = self.session.exec(
-            select(Condition).where(
-                Condition.agreement_id == agreement_id,
-                Condition.condition_id == condition_id,
-            )
-        ).one_or_none()
-        self._cache_set(key, condition, _TTL_CONDITION)
+        logger.debug("fetching condition from db", extra={"condition_id": condition_id})
+        condition = self.session.get(Condition, condition_id)
+        if condition:
+            self._cache_set(key, condition, _TTL_CONDITION)
+        else:
+            logger.info("condition not found", extra={"condition_id": condition_id})
         return condition
 
     def get_participant(
         self, user_id: str, agreement_id: str
     ) -> AgreementParticipant | None:
-        return self.session.exec(
+        logger.debug(
+            "fetching participant",
+            extra={"user_id": user_id, "agreement_id": agreement_id},
+        )
+        participant = self.session.exec(
             select(AgreementParticipant).where(
-                AgreementParticipant.user_id == user_id
-                and AgreementParticipant.agreement_id == agreement_id
+                AgreementParticipant.user_id == user_id,
+                AgreementParticipant.agreement_id == agreement_id,
             )
         ).first()
+        if not participant:
+            logger.info(
+                "participant not found",
+                extra={"user_id": user_id, "agreement_id": agreement_id},
+            )
+        return participant
 
     def get_participant_or_invitation_by_email(
         self, email: str, agreement_id: str
     ) -> AgreementParticipant | Invitation | None:
+        logger.debug(
+            "looking up participant or invitation by email",
+            extra={"email": email, "agreement_id": agreement_id},
+        )
         participant = self.session.exec(
             select(AgreementParticipant)
             .join(User)
@@ -109,12 +166,27 @@ class ConditionRepository(RedisClient):
             )
         ).first()
         if participant:
+            logger.debug(
+                "found participant by email",
+                extra={"email": email, "participant_id": participant.id},
+            )
             return participant
         invitation = self.session.exec(
             select(Invitation).where(
-                Invitation.email == email and Invitation.agreement_id == agreement_id
+                Invitation.email == email,
+                Invitation.agreement_id == agreement_id,
             )
         ).first()
+        if invitation:
+            logger.debug(
+                "found invitation by email",
+                extra={"email": email, "invitation_id": invitation.id},
+            )
+        else:
+            logger.info(
+                "no participant or invitation found",
+                extra={"email": email, "agreement_id": agreement_id},
+            )
         return invitation
 
     # ------------------------------------------------------------------ #

@@ -2,7 +2,7 @@ import logging
 from typing import Any
 
 from redis import Redis
-from sqlmodel import Session, select
+from sqlmodel import Session, func, select
 
 from app.models import Agreement, AgreementParticipant, Condition, Invitation, User
 from app.redis import RedisClient
@@ -61,19 +61,26 @@ class AgreementRepository(RedisClient):
         key = _user_agreements_key(user_id)
         cached = self._cache_get(key)
         if cached is not None:
-            logger.debug("Returning agreements for user id=%d", user_id)
-            return [Agreement.model_validate(agreement) for agreement in cached]
+            logger.debug("cache hit for user agreements", extra={"user_id": user_id})
+            return [
+                self.session.merge(Agreement.model_validate(a)) for a in cached
+            ]
 
+        logger.debug("fetching user agreements from db", extra={"user_id": user_id})
         agreements = self.session.exec(
             select(Agreement)
             .join(AgreementParticipant)
             .where(AgreementParticipant.user_id == user_id)
         ).all()
 
+        logger.debug(
+            "fetched user agreements",
+            extra={"user_id": user_id, "count": len(agreements)},
+        )
         if agreements:
             self._cache_set(
                 key,
-                [agreement.model_dump(mode="json") for agreement in agreements],
+                [a.model_dump(mode="json") for a in agreements],
                 _TTL_USER_AGREEMENTS,
             )
         return list(agreements)
@@ -83,13 +90,17 @@ class AgreementRepository(RedisClient):
         key = _agreement_key(agreement_id)
         cached = self._cache_get(key)
         if cached is not None:
-            logger.debug("Returning agreement id=%d", agreement_id)
+            logger.debug("cache hit for agreement", extra={"agreement_id": agreement_id})
             return Agreement.model_validate(cached)
 
+        logger.debug("fetching agreement from db", extra={"agreement_id": agreement_id})
         agreement = self.session.exec(
-            select(Agreement).where(Agreement.agreement_id == agreement_id)
+            select(Agreement).where(Agreement.id == agreement_id)
         ).first()
-        self._cache_set(key, agreement, _TTL_AGREEMENTS)
+        if agreement:
+            self._cache_set(key, agreement, _TTL_AGREEMENTS)
+        else:
+            logger.info("agreement not found", extra={"agreement_id": agreement_id})
         return agreement
 
     def get_user_by_email_or_phone(self, email_or_phone: str) -> User | None:
@@ -144,7 +155,7 @@ class AgreementRepository(RedisClient):
         invitation = Invitation(
             email=other_participant_email,
             token=invitation_token,
-            agreement_id=agreement.agreement_id,
+            agreement_id=agreement.id,
             role=role,
             invited_by=invited_by,
         )

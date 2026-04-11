@@ -1,15 +1,29 @@
-from fastapi import APIRouter
+import logging
+
+from fastapi import APIRouter, HTTPException
 
 from app.dependencies import ActiveUserDep, StatsServiceDep
-from app.schemas.stats_schema import UserStats
+from app.schemas.agreement_schema import AgreementStatistics
 
 router = APIRouter(prefix="/stats", tags=["Stats"])
 
+logger = logging.getLogger(__name__)
 
-@router.get("/user/", response_model=UserStats)
-async def get_user_stats(current_user: ActiveUserDep, stats_service: StatsServiceDep):
+
+@router.get("/agreements/", response_model=AgreementStatistics)
+async def get_user_agreement_stats(
+    current_user: ActiveUserDep, stats_service: StatsServiceDep
+):
     """
-    Get user statistics.
+    Get agreement dashboard statistics for the current user.
     """
 
-    return await stats_service.get_user_stats(current_user.user_id)
+    try:
+        logger.debug("fetching agreement stats", extra={"user_id": current_user.id})
+        return stats_service.get_user_stats(current_user.id)
+    except Exception as e:
+        logger.exception(
+            "failed to fetch agreement stats",
+            extra={"user_id": current_user.id, "error": str(e)},
+        )
+        raise HTTPException(status_code=500, detail=str(e))

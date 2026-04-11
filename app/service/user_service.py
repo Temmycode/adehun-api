@@ -19,7 +19,7 @@ class UserService:
         user = self.repository.update_user(user_id, updated_user)
 
         if not user:
-            logger.exception("Update failed: user not found id=%s", user_id)
+            logger.error("update failed, user not found", extra={"user_id": user_id})
             raise UserNotFound()
 
         return UserResponse.model_validate(user)
@@ -28,7 +28,7 @@ class UserService:
         user = self.repository.get_by_id(user_id)
 
         if not user:
-            logger.exception("User not found id=%s", user_id)
+            logger.error("user not found", extra={"user_id": user_id})
             raise UserNotFound()
 
         return UserResponse.model_validate(user)

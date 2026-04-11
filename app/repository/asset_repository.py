@@ -65,19 +65,23 @@ class AssetRepository(RedisClient):
         key = _asset_key(asset_id)
         cached = self._cache_get(key)
         if cached is not None:
+            logger.debug("cache hit for asset", extra={"asset_id": asset_id})
             return Asset.model_validate(cached)
 
+        logger.debug("fetching asset from db", extra={"asset_id": asset_id})
         asset = self.session.exec(
-            select(Asset).where(Asset.asset_id == asset_id)
+            select(Asset).where(Asset.id == asset_id)
         ).first()
         if asset:
             self._cache_set(key, asset, _TTL_ASSETS)
+        else:
+            logger.info("asset not found", extra={"asset_id": asset_id})
         return asset
 
     def get_assets_by_ids(self, asset_ids: list[str]) -> list[Asset]:
         """Get assets by ids"""
         return list(
-            self.session.exec(select(Asset).where(Asset.asset_id.in_(asset_ids))).all()  # pyright: ignore[reportAttributeAccessIssue]
+            self.session.exec(select(Asset).where(Asset.id.in_(asset_ids))).all()  # pyright: ignore[reportAttributeAccessIssue]
         )
 
     def get_condition(self, condition_id: str) -> Condition | None:
@@ -104,8 +108,10 @@ class AssetRepository(RedisClient):
         key = _agreement_asset_key(agreement_id)
         cached = self._cache_get(key)
         if cached is not None:
+            logger.debug("cache hit for agreement assets", extra={"agreement_id": agreement_id})
             return [Asset.model_validate(asset) for asset in cached]
 
+        logger.debug("fetching agreement assets from db", extra={"agreement_id": agreement_id})
         assets = list(
             self.session.exec(
                 select(Asset)
@@ -126,12 +132,15 @@ class AssetRepository(RedisClient):
         key = _condition_asset_key(condition_id)
         cached = self._cache_get(key)
         if cached is not None:
+            logger.debug("cache hit for condition assets", extra={"condition_id": condition_id})
             return [Asset.model_validate(asset) for asset in cached]
+
+        logger.debug("fetching condition assets from db", extra={"condition_id": condition_id})
         assets = list(
             self.session.exec(
                 select(Asset)
                 .join(Condition)
-                .where(Condition.condition_id == condition_id)
+                .where(Condition.id == condition_id)
             ).all()
         )
         if assets:

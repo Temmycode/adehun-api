@@ -27,20 +27,22 @@ def dev_login(
     button to test protected endpoints.
     """
 
-    logger.debug("dev_login: username=%s", form_data.username)
+    logger.debug("dev login attempt", extra={"username": form_data.username})
     user = session.exec(select(User).where(User.email == form_data.username)).first()
 
     if not user:
+        logger.info("dev login failed, user not found", extra={"username": form_data.username})
         raise HTTPException(status_code=404, detail="No user found with that email")
 
     if not user.active:
+        logger.info("dev login failed, inactive user", extra={"user_id": user.id, "email": user.email})
         raise HTTPException(status_code=400, detail="User account is inactive")
 
-    access_token = token_service.create_token(user.user_id, "access")
+    access_token = token_service.create_token(user.id, "access")
 
     logger.warning(
-        "Dev login used for user email=%s — ensure DEBUG=false in production",
-        user.email,
+        "dev login used — ensure DEBUG=false in production",
+        extra={"user_id": user.id, "email": user.email},
     )
 
     return {"access_token": access_token, "token_type": "bearer"}

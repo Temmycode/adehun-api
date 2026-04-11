@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from app.dependencies import ActiveUserDep, ConditionServiceDep
 from app.exceptions import (
@@ -42,7 +42,7 @@ async def add_condition_to_agreement(
     try:
         return condition_service.add_condition(
             agreement_id,
-            current_user.user_id,
+            current_user.id,
             condition_data,
         )
     except ParticipantNotFoundError as e:
@@ -51,25 +51,45 @@ async def add_condition_to_agreement(
         raise HTTPException(status_code=500, detail=e.message)
 
 
-@router.get("/conditions", response_model=list[BatchConditionResponse])
+# @router.get("/conditions", response_model=list[BatchConditionResponse])
+# @limiter.limit("10/minute")
+# async def get_agreements_conditions(
+#     request: Request,
+#     current_user: ActiveUserDep,
+#     condition_service: ConditionServiceDep,
+#     agreement_ids: list[str] = Query(...),
+# ):
+#     """
+#     Get conditions for a given agreement.
+
+#     Returns:
+#         A list of condition responses.
+#     """
+
+#     try:
+#         return condition_service.get_agreement_conditions(
+#             agreement_ids, current_user.id
+#         )
+#     except ConditionNotFoundError as e:
+#         raise HTTPException(status_code=404, detail=e.message)
+
+
+@router.get("/conditions/", response_model=list[BatchConditionResponse])
 @limiter.limit("10/minute")
-async def get_agreements_conditions(
+async def get_users_conditions(
     request: Request,
     current_user: ActiveUserDep,
     condition_service: ConditionServiceDep,
-    agreement_ids: list[str] = Query(...),
 ):
     """
-    Get conditions for a given agreement.
+    Get conditions for a given user.
 
     Returns:
         A list of condition responses.
     """
 
     try:
-        return condition_service.get_agreement_conditions(
-            agreement_ids, current_user.user_id
-        )
+        return condition_service.get_user_conditions(current_user.id)
     except ConditionNotFoundError as e:
         raise HTTPException(status_code=404, detail=e.message)
 
@@ -81,7 +101,6 @@ async def get_agreements_conditions(
 @limiter.limit("10/minute")
 async def get_condition_details(
     request: Request,
-    agreement_id: str,
     condition_id: str,
     _: ActiveUserDep,
     condition_service: ConditionServiceDep,
@@ -94,7 +113,7 @@ async def get_condition_details(
     """
 
     try:
-        return condition_service.get_condition(agreement_id, condition_id)
+        return condition_service.get_condition(condition_id)
     except ConditionNotFoundError as e:
         raise HTTPException(status_code=404, detail=e.message)
 
@@ -103,7 +122,6 @@ async def get_condition_details(
 @limiter.limit("10/minute")
 async def approve_condition(
     request: Request,
-    agreement_id: str,
     condition_id: str,
     current_user: ActiveUserDep,
     condition_service: ConditionServiceDep,
@@ -116,9 +134,7 @@ async def approve_condition(
     """
 
     try:
-        return condition_service.approve_condition(
-            agreement_id, condition_id, current_user.user_id
-        )
+        return condition_service.approve_condition(condition_id, current_user.id)
     except ConditionNotFoundError as e:
         raise HTTPException(status_code=404, detail=e.message)
     except PermissionError as e:
@@ -132,7 +148,6 @@ async def approve_condition(
 @limiter.limit("10/minute")
 async def reject_condition(
     request: Request,
-    agreement_id: str,
     condition_id: str,
     current_user: ActiveUserDep,
     condition_service: ConditionServiceDep,
@@ -147,9 +162,8 @@ async def reject_condition(
 
     try:
         return condition_service.reject_condition(
-            agreement_id,
             condition_id,
-            current_user.user_id,
+            current_user.id,
             reject_data.rejected_reason,
         )
     except ConditionNotFoundError as e:

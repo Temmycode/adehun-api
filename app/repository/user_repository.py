@@ -65,13 +65,15 @@ class UserRepository(RedisClient):
         key = _user_key(user_id)
         cached = self._cache_get(key)
         if cached is not None:
-            logger.debug("Returning cached user id=%d", user_id)
-            return User.model_validate(cached)
+            logger.debug("cache hit for user", extra={"user_id": user_id})
+            return self.session.merge(User.model_validate(cached))
 
-        logger.debug("DB fetch user id=%d", user_id)
-        db_user = self.session.exec(select(User).where(User.user_id == user_id)).first()
+        logger.debug("fetching user from db", extra={"user_id": user_id})
+        db_user = self.session.exec(select(User).where(User.id == user_id)).first()
         if db_user:
             self._cache_set(key, db_user, _TTL_USER)
+        else:
+            logger.info("user not found", extra={"user_id": user_id})
         return db_user
 
     def get_by_email(self, email: str) -> User | None:

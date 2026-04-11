@@ -7,10 +7,12 @@ from ..schemas.participant_schema import ParticipantResponse
 
 
 class TransactionResponse(BaseModel):
-    transaction_id: str
+    id: str
     participant: ParticipantResponse
     amount: Decimal
     type: str
     status: str
     processed_at: datetime | None = None
     created_at: datetime
+
+    model_config = {"from_attributes": True}

@@ -27,12 +27,12 @@ def _resolve_storage_uri() -> str:
         storage = RedisStorage(REDIS_URL)
         # check() sends a PING and raises if the server is unreachable.
         storage.check()
-        logger.info("Rate limiter: connected to Redis — using Redis storage")
+        logger.info("rate limiter connected to redis", extra={"storage": "redis"})
         return REDIS_URL
     except Exception:
         logger.warning(
-            "Rate limiter: Redis is unreachable — falling back to in-memory storage. "
-            "Rate limits will not be shared across multiple workers.",
+            "rate limiter falling back to in-memory storage",
+            extra={"storage": "memory", "reason": "redis unreachable"},
         )
         return MEMORY_URL
 

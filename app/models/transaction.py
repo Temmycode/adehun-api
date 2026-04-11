@@ -1,8 +1,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal
-from uuid import uuid4
-
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -12,10 +11,10 @@ if TYPE_CHECKING:
 
 
 class Transaction(SQLModel, table=True):
-    transaction_id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
 
-    agreement_id: str = Field(foreign_key="agreement.agreement_id")
-    participant_id: str = Field(foreign_key="agreement_participant.participant_id")
+    agreement_id: str = Field(foreign_key="agreement.id")
+    participant_id: str = Field(foreign_key="agreement_participant.id")
     condition_id: str | None = None  # INFO: For milestone payment
 
     amount: Decimal

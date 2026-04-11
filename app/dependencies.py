@@ -57,8 +57,10 @@ AgreementRepositoryDep = Annotated[
 ]
 
 
-def get_condition_repository(session: SessionDep) -> ConditionRepository:
-    return ConditionRepository(session)
+def get_condition_repository(
+    session: SessionDep, redis_client: RedisDep
+) -> ConditionRepository:
+    return ConditionRepository(session, redis_client)
 
 
 ConditionRepositoryDep = Annotated[
@@ -87,10 +89,8 @@ def get_agreement_service(agreement_repo: AgreementRepositoryDep) -> AgreementSe
 AgreementServiceDep = Annotated[AgreementService, Depends(get_agreement_service)]
 
 
-def get_condition_service(
-    condition_repo: ConditionRepositoryDep, redis_client: RedisDep
-) -> ConditionService:
-    return ConditionService(condition_repo, redis_client)
+def get_condition_service(condition_repo: ConditionRepositoryDep) -> ConditionService:
+    return ConditionService(condition_repo)
 
 
 ConditionServiceDep = Annotated[ConditionService, Depends(get_condition_service)]

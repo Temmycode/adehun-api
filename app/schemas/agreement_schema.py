@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel
 
+from app.schemas.participant_schema import ParticipantResponse
 from app.schemas.user_schema import UserResponse
 
 
@@ -29,11 +30,13 @@ class AgreementCreate(BaseModel):
 
 
 class AgreementResponse(BaseModel):
-    agreement_id: str
+    id: str
     title: str
     description: str
     amount: Decimal
     status: str
+    depositor: ParticipantResponse | None = None
+    beneficiary: ParticipantResponse | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -50,3 +53,9 @@ class InvitationResponse(BaseModel):
     expires_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class AgreementStatistics(BaseModel):
+    active_agreements: int
+    completed_agreements: int
+    total_agreements: int
