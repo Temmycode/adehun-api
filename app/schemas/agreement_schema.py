@@ -3,12 +3,13 @@ from decimal import Decimal
 
 from pydantic import BaseModel
 
+from app.schemas.conditions_schema import ConditionCreate, ConditionResponse
 from app.schemas.participant_schema import ParticipantResponse
 from app.schemas.user_schema import UserResponse
 
 
 class AgreementInvitationResponse(BaseModel):
-    invitation_id: str
+    id: str
     email: str
     token: str
     role: str
@@ -27,6 +28,8 @@ class AgreementCreate(BaseModel):
     description: str
     # Transaction Data
     amount: Decimal
+    # Initial conditions
+    conditions: list[ConditionCreate]
 
 
 class AgreementResponse(BaseModel):
@@ -42,8 +45,14 @@ class AgreementResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class AgreementCreateResponse(AgreementResponse):
+    conditions: list[ConditionResponse]
+
+    model_config = {"from_attributes": True}
+
+
 class InvitationResponse(BaseModel):
-    invitation_id: str
+    id: str
     email: str
     token: str
     agreement: AgreementResponse

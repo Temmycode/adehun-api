@@ -2,19 +2,23 @@ import logging
 
 from fastapi import BackgroundTasks
 
+import app.service.email_service as email_service
 from app.common.enums import InvitationStatus
+from app.config import settings
 from app.exceptions import (
     AgreementAcceptanceError,
     AgreementCreationError,
     AgreementNotFoundError,
 )
-from app.models import Agreement, AgreementParticipant
+from app.models import Agreement, AgreementParticipant, Condition, Invitation
 from app.repository.agreement_repository import AgreementRepository
 from app.schemas.agreement_schema import (
     AgreementCreate,
+    AgreementCreateResponse,
     AgreementResponse,
     InvitationResponse,
 )
+from app.schemas.conditions_schema import ConditionResponse
 from app.schemas.participant_schema import ParticipantResponse
 
 from ..service.invitation_service import (
@@ -36,8 +40,8 @@ class AgreementService:
         email: str,
         is_email: bool,
         agreement: Agreement,
-        background_tasks,
-    ):
+        background_tasks: BackgroundTasks,
+    ) -> Invitation:
 
         # invite the other participant via email/phone
         invitation_token = get_invitation_token()
@@ -56,12 +60,12 @@ class AgreementService:
                 invitation_token,
                 invitation_data.model_dump(mode="json"),
             )
-        # invitation_link = f"{settings.frontend_url}/invite?token={invitation_token}"
-        # background_tasks.add_task(
-        #     "EmailService.send_tutor_invitation",
-        #     email,
-        #     invitation_link,
-        # )
+        invitation_link = f"{settings.frontend_url}/invite?token={invitation_token}"
+        background_tasks.add_task(
+            email_service.send_invitation_email,
+            email,
+            invitation_link,
+        )
         logger.info(
             "participant invited",
             extra={
@@ -71,13 +75,14 @@ class AgreementService:
                 "creator_id": creator_id,
             },
         )
+        return invitation
 
     def create_agreement(
         self,
         current_user_id: str,
         agreement_data: AgreementCreate,
         background_tasks: BackgroundTasks,
-    ) -> AgreementResponse:
+    ) -> AgreementCreateResponse:
         try:
             # create agreement
             agreement = self.agreement_repo.flush(
@@ -96,9 +101,11 @@ class AgreementService:
                 role=agreement_data.role,
                 status=InvitationStatus.ACCEPTED.value,
             )
+
             self.agreement_repo.flush_participant(creator)
 
-            self._invite_participant(
+            # invite the other participant (flushed, so we get an id)
+            invitation = self._invite_participant(
                 agreement_data.role,
                 creator.user_id,
                 agreement_data.other_participant_email_or_phone,
@@ -107,11 +114,37 @@ class AgreementService:
                 background_tasks,
             )
 
+            # create conditions linked to creator and invitation
+            # required_from_participant_id is None because the other party
+            # hasn't accepted yet — it gets backfilled when they accept
+            # via update_agreement_conditions_with_invitation
+            conditions = [
+                Condition(
+                    agreement_id=agreement.id,
+                    participant_id=creator.id,
+                    title=c.title,
+                    description=c.description,
+                    required_from_participant_id=None,
+                    invitation_id=invitation.id,
+                )
+                for c in agreement_data.conditions
+            ]
+            self.agreement_repo.session.add_all(conditions)
+
             # save all
             self.agreement_repo.commit()
+            for c in conditions:
+                self.agreement_repo.session.refresh(c)
 
-            return AgreementResponse.model_validate(
-                self.agreement_repo.get_by_id(agreement.id)
+            db_agreement = self.agreement_repo.get_by_id(agreement.id)
+            if db_agreement is None:
+                raise AgreementNotFoundError()
+
+            agreement_response = self._to_agreement_response(db_agreement)
+
+            return AgreementCreateResponse(
+                **agreement_response.model_dump(),
+                conditions=[ConditionResponse.model_validate(c) for c in conditions],
             )
         except Exception as err:
             logger.exception(

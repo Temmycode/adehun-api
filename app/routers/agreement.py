@@ -7,7 +7,11 @@ from app.exceptions import (
     AgreementNotFoundError,
 )
 from app.rate_limiting import limiter
-from app.schemas.agreement_schema import AgreementCreate, AgreementResponse
+from app.schemas.agreement_schema import (
+    AgreementCreate,
+    AgreementCreateResponse,
+    AgreementResponse,
+)
 
 router = APIRouter(prefix="/agreements", tags=["Agreements"])
 
@@ -28,7 +32,7 @@ async def get_all_user_agreements(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/", status_code=201, response_model=AgreementResponse)
+@router.post("/", status_code=201, response_model=AgreementCreateResponse)
 @limiter.limit("10/minute")
 async def create_agreement(
     request: Request,
@@ -36,7 +40,7 @@ async def create_agreement(
     agreement_data: AgreementCreate,
     agreement_service: AgreementServiceDep,
     background_tasks: BackgroundTasks,
-) -> AgreementResponse:
+) -> AgreementCreateResponse:
     """
     Create a new agreement.
 
@@ -49,6 +53,9 @@ async def create_agreement(
             agreement_data,
             background_tasks,
         )
+
+    except AgreementNotFoundError as e:
+        raise HTTPException(status_code=404, detail=e.message)
     except AgreementCreationError as e:
         raise HTTPException(status_code=500, detail=e.message)
 
@@ -68,6 +75,7 @@ async def accept_agreement(
         return agreement_service.accept_agreement(
             agreement_id, current_user.id, current_user.email
         )
+
     except AgreementAcceptanceError as e:
         raise HTTPException(status_code=500, detail=e.message)
 
@@ -85,5 +93,6 @@ async def get_agreement(
     """
     try:
         return agreement_service.get_agreement(agreement_id)
+
     except AgreementNotFoundError as e:
         raise HTTPException(status_code=500, detail=e.message)

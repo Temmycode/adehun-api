@@ -2,7 +2,7 @@ import logging
 from typing import Any
 
 from redis import Redis
-from sqlmodel import Session, func, select
+from sqlmodel import Session, select
 
 from app.models import Agreement, AgreementParticipant, Condition, Invitation, User
 from app.redis import RedisClient
@@ -62,9 +62,7 @@ class AgreementRepository(RedisClient):
         cached = self._cache_get(key)
         if cached is not None:
             logger.debug("cache hit for user agreements", extra={"user_id": user_id})
-            return [
-                self.session.merge(Agreement.model_validate(a)) for a in cached
-            ]
+            return [self.session.merge(Agreement.model_validate(a)) for a in cached]
 
         logger.debug("fetching user agreements from db", extra={"user_id": user_id})
         agreements = self.session.exec(
@@ -90,7 +88,9 @@ class AgreementRepository(RedisClient):
         key = _agreement_key(agreement_id)
         cached = self._cache_get(key)
         if cached is not None:
-            logger.debug("cache hit for agreement", extra={"agreement_id": agreement_id})
+            logger.debug(
+                "cache hit for agreement", extra={"agreement_id": agreement_id}
+            )
             return Agreement.model_validate(cached)
 
         logger.debug("fetching agreement from db", extra={"agreement_id": agreement_id})
@@ -189,7 +189,7 @@ class AgreementRepository(RedisClient):
         ).first()
 
         if condition:
-            condition.invitation_id = participant_id
+            condition.required_from_participant_id = participant_id
             self.session.add(condition)
             self.session.commit()
             self.session.refresh(condition)
