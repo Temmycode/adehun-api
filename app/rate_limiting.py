@@ -1,11 +1,11 @@
-import logging
+from app.logging import get_logger
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from .config import settings
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 REDIS_URL = (
     f"redis://default:{settings.redis_database_password}"

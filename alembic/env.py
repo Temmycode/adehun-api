@@ -12,6 +12,7 @@ from app.models.asset import Asset  # noqa: F401
 from app.models.asset_file import AssetFile  # noqa: F401
 from app.models.condition import Condition  # noqa: F401
 from app.models.invitation import Invitation  # noqa: F401
+from app.models.notification import Notification  # noqa: F401
 from app.models.transaction import Transaction  # noqa: F401
 
 # Import all models so SQLAlchemy registers them in the metadata before

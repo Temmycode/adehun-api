@@ -1,9 +1,10 @@
-import logging
+from app.logging import get_logger
 from datetime import datetime, timezone
 
 from app.exceptions import (
     ConditionNotFoundError,
     ConditionSaveError,
+    ForbiddenError,
     ParticipantNotFoundError,
 )
 from app.models import AgreementParticipant, Condition, Invitation
@@ -15,7 +16,7 @@ from app.schemas.conditions_schema import (
     ConditionResponse,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _agreement_condition(agreement_id: str) -> str:
@@ -138,7 +139,7 @@ class ConditionService(RedisClient):
                     "condition_owner_id": condition.participant_id,
                 },
             )
-            raise PermissionError(
+            raise ForbiddenError(
                 "Only the participant who created the condition can approve it."
             )
 
@@ -188,7 +189,7 @@ class ConditionService(RedisClient):
                     "condition_owner_id": condition.participant_id,
                 },
             )
-            raise PermissionError(
+            raise ForbiddenError(
                 "Only the participant who created the condition can approve it."
             )
 

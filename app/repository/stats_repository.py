@@ -1,10 +1,10 @@
-import logging
+from app.logging import get_logger
 
 from sqlmodel import Session, func, select
 
 from app.models import Agreement, AgreementParticipant
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class StatsRepository:

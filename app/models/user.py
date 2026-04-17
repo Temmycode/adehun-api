@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from .agreement import Agreement
     from .agreement_participant import AgreementParticipant
     from .invitation import Invitation
+    from .notification import Notification
 
 
 class User(SQLModel, table=True):
@@ -26,3 +27,4 @@ class User(SQLModel, table=True):
         back_populates="invited_by_user", sa_relationship_kwargs={"lazy": "selectin"}
     )
     agreements: list["Agreement"] = Relationship(back_populates="user")
+    notifications: list["Notification"] = Relationship(back_populates="user")

@@ -1,5 +1,5 @@
 import json
-import logging
+from app.logging import get_logger
 from typing import Annotated, Any, Generator
 
 from fastapi import Depends
@@ -7,7 +7,7 @@ from redis import Redis
 
 from app.config import settings
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 _redis_client: Redis | None = None

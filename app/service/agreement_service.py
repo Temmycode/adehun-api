@@ -1,4 +1,4 @@
-import logging
+from app.logging import get_logger
 
 from fastapi import BackgroundTasks
 
@@ -26,7 +26,7 @@ from ..service.invitation_service import (
     store_invitation,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AgreementService:

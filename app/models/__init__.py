@@ -4,6 +4,7 @@ from .asset import Asset
 from .asset_file import AssetFile
 from .condition import Condition
 from .invitation import Invitation
+from .notification import Notification
 from .transaction import Transaction
 from .user import User
 
@@ -16,4 +17,5 @@ __all__ = [
     "Transaction",
     "User",
     "Invitation",
+    "Notification",
 ]

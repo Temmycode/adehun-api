@@ -1,4 +1,4 @@
-import logging
+from app.logging import get_logger
 
 from redis import Redis
 from sqlmodel import Session, select
@@ -6,7 +6,7 @@ from sqlmodel import Session, select
 from app.models import Agreement, AgreementParticipant, Asset
 from app.redis import RedisClient
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # TTL constants (seconds)

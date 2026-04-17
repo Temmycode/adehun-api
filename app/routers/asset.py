@@ -1,39 +1,51 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 
-from app.dependencies import ActiveUserDep, AssetServiceDep
-from app.exceptions import (
-    AgreementNotFoundError,
-    AssetRetrievalError,
-    AssetUploadError,
-    ConditionNotFoundError,
+from app.core.response import (
+    APIResponse,
+    ForbiddenResponse,
+    InternalServerErrorResponse,
+    NotFoundResponse,
+    UnauthorizedResponse,
+    success_response,
 )
+from app.dependencies import ActiveUserDep, AssetServiceDep
 from app.schemas.asset_schema import AssetCreateRequest, AssetResponse
 from app.schemas.image_upload_schema import SignedUploadResponse
 
-router = APIRouter(tags=["Assets"])
+router = APIRouter(
+    tags=["Assets"],
+    responses={
+        401: {"model": UnauthorizedResponse},
+        500: {"model": InternalServerErrorResponse},
+    },
+)
 
 
-@router.get("/agreement/{agreement_id}/assets/", response_model=list[AssetResponse])
+@router.get(
+    "/agreement/{agreement_id}/assets/",
+    response_model=APIResponse[list[AssetResponse]],
+    responses={404: {"model": NotFoundResponse}},
+)
 async def get_assets_for_agreement(
     request: Request,
     agreement_id: str,
     asset_service: AssetServiceDep,
     _: ActiveUserDep,
 ):
-    """
-    Get assets for an agreement
-    """
-
-    try:
-        assets = asset_service.get_assets_for_agreement(agreement_id)
-        return [AssetResponse.model_validate(asset) for asset in assets]
-    except AgreementNotFoundError as e:
-        raise HTTPException(status_code=404, detail=e.message)
-    except AssetRetrievalError as e:
-        raise HTTPException(status_code=500, detail=e.message)
+    """Get assets for an agreement."""
+    return success_response(
+        data=asset_service.get_assets_for_agreement(agreement_id)
+    )
 
 
-@router.post("/conditions/{condition_id}/assets", response_model=AssetResponse)
+@router.post(
+    "/conditions/{condition_id}/assets",
+    response_model=APIResponse[list[AssetResponse]],
+    responses={
+        403: {"model": ForbiddenResponse},
+        404: {"model": NotFoundResponse},
+    },
+)
 async def add_asset_to_condition(
     request: Request,
     condition_id: str,
@@ -41,44 +53,34 @@ async def add_asset_to_condition(
     asset_service: AssetServiceDep,
     current_user: ActiveUserDep,
 ):
-    """
-    Add assets to a condition
-    """
-
-    try:
-        return asset_service.add_asset_to_condition(
+    """Add assets to a condition."""
+    return success_response(
+        data=asset_service.add_asset_to_condition(
             current_user.id, condition_id, asset_data
         )
-    except ConditionNotFoundError as e:
-        raise HTTPException(status_code=404, detail=e.message)
-    except PermissionError as e:
-        raise HTTPException(status_code=403, detail=str(e))
-    except AssetUploadError as e:
-        raise HTTPException(status_code=500, detail=e.message)
+    )
 
 
-@router.get("/conditions/{condition_id}/assets", response_model=list[AssetResponse])
+@router.get(
+    "/conditions/{condition_id}/assets",
+    response_model=APIResponse[list[AssetResponse]],
+    responses={404: {"model": NotFoundResponse}},
+)
 async def get_assets_for_condition(
     request: Request,
     condition_id: str,
     asset_service: AssetServiceDep,
     _: ActiveUserDep,
 ):
-    """
-    Get assets for a condition
-    """
-
-    try:
-        return asset_service.get_assets_for_condition(condition_id)
-    except ConditionNotFoundError as e:
-        raise HTTPException(status_code=404, detail=e.message)
-    except AssetRetrievalError as e:
-        raise HTTPException(status_code=500, detail=e.message)
+    """Get assets for a condition."""
+    return success_response(
+        data=asset_service.get_assets_for_condition(condition_id)
+    )
 
 
 @router.get(
     "/conditions/{condition_id}/assets/upload-signature",
-    response_model=SignedUploadResponse,
+    response_model=APIResponse[SignedUploadResponse],
 )
 async def get_upload_signature(
     request: Request,
@@ -86,13 +88,7 @@ async def get_upload_signature(
     asset_service: AssetServiceDep,
     _: ActiveUserDep,
 ):
-    """
-    Get upload signature for assets
-    """
-
-    try:
-        return asset_service.create_asset_signature(condition_id)
-    except AssetUploadError as e:
-        raise HTTPException(status_code=500, detail=e.message)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Get upload signature for assets."""
+    return success_response(
+        data=asset_service.create_asset_signature(condition_id)
+    )

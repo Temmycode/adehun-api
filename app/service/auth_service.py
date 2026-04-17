@@ -1,9 +1,9 @@
-import logging
+from app.logging import get_logger
 
 from firebase_admin import auth
 
 from app import token_service
-from app.exceptions import InvitationNotFoundError, UserNotFound
+from app.exceptions import InvitationNotFoundError, UserNotFoundError
 from app.models import User
 from app.repository.user_repository import UserRepository
 from app.schemas.auth_schema import LoginResponse, UserCreateRequest
@@ -11,7 +11,7 @@ from app.schemas.user_schema import UserResponse
 
 from ..service.invitation_service import validate_token
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AuthService:
@@ -44,7 +44,7 @@ class AuthService:
                 "registration failed, user not found",
                 extra={"user_id": register_data.user_id},
             )
-            raise UserNotFound()
+            raise UserNotFoundError()
         return UserResponse.model_validate(user)
 
     def verify_invitation(self, invitation_token: str) -> dict:
@@ -102,7 +102,7 @@ class AuthService:
         user = self.user_repo.get_by_id(user_id)
 
         if not user:
-            raise UserNotFound("User not found")
+            raise UserNotFoundError("User not found")
 
         # Create tokens for user
         access_token = token_service.create_token(user_id, "access")

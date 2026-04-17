@@ -1,15 +1,16 @@
-import logging
+from app.logging import get_logger
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlmodel import select
 
 from app import token_service
 from app.database import SessionDep
+from app.exceptions import BadRequestError, UserNotFoundError
 from app.models import User
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Development"])
 
@@ -25,18 +26,27 @@ def dev_login(
     Swagger UI login endpoint. Enter your email as the username and anything
     as the password. Returns a bearer token you can use with the Authorize
     button to test protected endpoints.
+
+    NOTE: returns the raw OAuth2 token shape (not wrapped in APIResponse) so
+    Swagger's "Authorize" flow can parse it directly.
     """
 
     logger.debug("dev login attempt", extra={"username": form_data.username})
     user = session.exec(select(User).where(User.email == form_data.username)).first()
 
     if not user:
-        logger.info("dev login failed, user not found", extra={"username": form_data.username})
-        raise HTTPException(status_code=404, detail="No user found with that email")
+        logger.info(
+            "dev login failed, user not found",
+            extra={"username": form_data.username},
+        )
+        raise UserNotFoundError("No user found with that email")
 
     if not user.active:
-        logger.info("dev login failed, inactive user", extra={"user_id": user.id, "email": user.email})
-        raise HTTPException(status_code=400, detail="User account is inactive")
+        logger.info(
+            "dev login failed, inactive user",
+            extra={"user_id": user.id, "email": user.email},
+        )
+        raise BadRequestError("User account is inactive")
 
     access_token = token_service.create_token(user.id, "access")
 

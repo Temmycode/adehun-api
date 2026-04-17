@@ -1,10 +1,11 @@
-import logging
+from app.logging import get_logger
 
 from app.exceptions import (
     AgreementNotFoundError,
     AssetRetrievalError,
     AssetUploadError,
     ConditionNotFoundError,
+    ForbiddenError,
 )
 from app.models import Asset
 from app.models.asset_file import AssetFile
@@ -13,7 +14,7 @@ from app.schemas.asset_schema import AssetCreateRequest, AssetResponse
 from app.schemas.image_upload_schema import SignedUploadResponse
 from app.service.image_upload_service import create_upload_signature
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _condition_asset_key(condition_id: str) -> str:
@@ -60,7 +61,7 @@ class AssetService:
                         "condition_id": condition_id,
                     },
                 )
-                raise PermissionError("User is not a participant of this agreement")
+                raise ForbiddenError("User is not a participant of this agreement")
 
             files = [
                 AssetFile(url=data.url, type=data.type) for data in asset_data.files
@@ -95,7 +96,7 @@ class AssetService:
                 },
             )
             return [AssetResponse.model_validate(asset) for asset in assets]
-        except (ConditionNotFoundError, PermissionError):
+        except (ConditionNotFoundError, ForbiddenError):
             raise
         except Exception as e:
             logger.exception(

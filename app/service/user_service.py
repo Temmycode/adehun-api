@@ -1,12 +1,12 @@
-import logging
+from app.logging import get_logger
 
 from firebase_admin import auth
 
-from app.exceptions import UserNotFound
+from app.exceptions import UserNotFoundError
 from app.repository.user_repository import UserRepository
 from app.schemas.user_schema import UpdateUserRequest, UserResponse
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class UserService:
@@ -20,7 +20,7 @@ class UserService:
 
         if not user:
             logger.error("update failed, user not found", extra={"user_id": user_id})
-            raise UserNotFound()
+            raise UserNotFoundError()
 
         return UserResponse.model_validate(user)
 
@@ -29,6 +29,6 @@ class UserService:
 
         if not user:
             logger.error("user not found", extra={"user_id": user_id})
-            raise UserNotFound()
+            raise UserNotFoundError()
 
         return UserResponse.model_validate(user)
