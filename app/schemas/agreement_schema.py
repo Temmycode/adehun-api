@@ -41,6 +41,8 @@ class AgreementResponse(BaseModel):
     depositor: ParticipantResponse | None = None
     beneficiary: ParticipantResponse | None = None
     created_at: datetime
+    condition_count: int | None = 0
+    conditions_met_count: int | None = 0
 
     model_config = {"from_attributes": True}
 

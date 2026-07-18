@@ -82,7 +82,9 @@ async def create_agreement(
         background_tasks,
     )
 
-    invited = user_repository.get_by_email(agreement_data.other_participant_email_or_phone)
+    invited = user_repository.get_by_email(
+        agreement_data.other_participant_email_or_phone
+    )
     if invited and invited.id != current_user.id:
         try:
             notification_service.create_notification(
@@ -131,9 +133,7 @@ async def accept_agreement(
     participants = [
         p for p in (agreement.depositor, agreement.beneficiary) if p is not None
     ]
-    other_user_ids = [
-        p.user.id for p in participants if p.user.id != current_user.id
-    ]
+    other_user_ids = [p.user.id for p in participants if p.user.id != current_user.id]
 
     for uid in other_user_ids:
         try:

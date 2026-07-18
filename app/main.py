@@ -1,3 +1,6 @@
+# TODO: WORK ON PAYING FOR THE DOMAIN SO WE CAN MAKE USE OF EMAILS WITH RESEND
+
+
 import json
 from contextlib import asynccontextmanager
 

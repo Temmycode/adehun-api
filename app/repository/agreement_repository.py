@@ -1,9 +1,10 @@
-from app.logging import get_logger
 from typing import Any
 
 from redis import Redis
-from sqlmodel import Session, select
+from sqlalchemy import case, func
+from sqlmodel import Session, col, select
 
+from app.logging import get_logger
 from app.models import Agreement, AgreementParticipant, Condition, Invitation, User
 from app.redis import RedisClient
 
@@ -56,13 +57,20 @@ class AgreementRepository(RedisClient):
         self.session.refresh(agreement)
         return agreement
 
-    def get_user_agreements(self, user_id: str) -> list[Agreement]:
-        """Return a list of agreements for the given user ID."""
+    def get_user_agreements(self, user_id: str) -> list[tuple[Agreement, int, int]]:
+        """Return a list of agreements for the given user ID.
+
+        Each tuple is (agreement, total_conditions_count, conditions_met_count).
+        """
+
         key = _user_agreements_key(user_id)
         cached = self._cache_get(key)
         if cached is not None:
             logger.debug("cache hit for user agreements", extra={"user_id": user_id})
-            return [self.session.merge(Agreement.model_validate(a)) for a in cached]
+            return [
+                (self.session.merge(Agreement.model_validate(a)), total, met)
+                for a, total, met in cached
+            ]
 
         logger.debug("fetching user agreements from db", extra={"user_id": user_id})
         agreements = self.session.exec(
@@ -70,18 +78,46 @@ class AgreementRepository(RedisClient):
             .join(AgreementParticipant)
             .where(AgreementParticipant.user_id == user_id)
         ).all()
-
         logger.debug(
             "fetched user agreements",
             extra={"user_id": user_id, "count": len(agreements)},
         )
-        if agreements:
-            self._cache_set(
-                key,
-                [a.model_dump(mode="json") for a in agreements],
-                _TTL_USER_AGREEMENTS,
+
+        if not agreements:
+            return []
+
+        agreement_ids = [a.id for a in agreements]
+
+        condition_counts = self.session.exec(
+            select(
+                Condition.agreement_id,
+                func.count(Condition.id),  # pyright: ignore[reportArgumentType]
+                func.sum(case((Condition.status == "approved", 1), else_=0)),  # pyright: ignore[reportArgumentType]
             )
-        return list(agreements)
+            .where(col(Condition.agreement_id).in_(agreement_ids))
+            .group_by(Condition.agreement_id)
+        ).all()
+
+        counts_by_agreement = {
+            agreement_id: (total, met or 0)
+            for agreement_id, total, met in condition_counts
+        }
+
+        results = [
+            (agreement, *counts_by_agreement.get(agreement.id, (0, 0)))
+            for agreement in agreements
+        ]
+
+        self._cache_set(
+            key,
+            [
+                (agreement.model_dump(mode="json"), total, met)
+                for agreement, total, met in results
+            ],
+            _TTL_USER_AGREEMENTS,
+        )
+
+        return results
 
     def get_by_id(self, agreement_id: str) -> Agreement | None:
         """Return an agreement by its ID."""

@@ -58,9 +58,7 @@ def _notify_agreement_participants(
     participants = [
         p for p in (agreement.depositor, agreement.beneficiary) if p is not None
     ]
-    recipient_ids = [
-        p.user.id for p in participants if p.user.id != acting_user_id
-    ]
+    recipient_ids = [p.user.id for p in participants if p.user.id != acting_user_id]
 
     for uid in recipient_ids:
         try:
@@ -117,18 +115,19 @@ async def add_condition_to_agreement(
 
 
 @router.get(
-    "/conditions/",
+    "/agreements/{agreement_id}/conditions",
     response_model=APIResponse[list[BatchConditionResponse]],
 )
 @limiter.limit("10/minute")
-async def get_users_conditions(
+async def get_agreement_conditions(
     request: Request,
+    agreement_id: str,
     current_user: ActiveUserDep,
     condition_service: ConditionServiceDep,
 ):
     """Get conditions for the authenticated user."""
     return success_response(
-        data=condition_service.get_user_conditions(current_user.id)
+        data=condition_service.get_agreement_conditions(agreement_id, current_user.id)
     )
 
 

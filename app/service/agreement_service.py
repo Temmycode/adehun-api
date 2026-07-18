@@ -140,7 +140,9 @@ class AgreementService:
             if db_agreement is None:
                 raise AgreementNotFoundError()
 
-            agreement_response = self._to_agreement_response(db_agreement)
+            agreement_response = self._to_agreement_response(
+                db_agreement, len(conditions), 0
+            )
 
             return AgreementCreateResponse(
                 **agreement_response.model_dump(),
@@ -166,10 +168,17 @@ class AgreementService:
         """Get all agreements for a user"""
 
         db_agreements = self.agreement_repo.get_user_agreements(user_id)
-        return [self._to_agreement_response(a) for a in db_agreements]
+        return [
+            self._to_agreement_response(agr, con_ct, met_ct)
+            for agr, con_ct, met_ct in db_agreements
+        ]
 
     @staticmethod
-    def _to_agreement_response(agreement: Agreement) -> AgreementResponse:
+    def _to_agreement_response(
+        agreement: Agreement,
+        condition_count: int,
+        conditions_met_count: int,
+    ) -> AgreementResponse:
         """Map an Agreement (with loaded participants) to AgreementResponse."""
         depositor: AgreementParticipant | None = None
         beneficiary: AgreementParticipant | None = None
@@ -192,6 +201,8 @@ class AgreementService:
             if beneficiary
             else None,
             created_at=agreement.created_at,
+            condition_count=condition_count,
+            conditions_met_count=conditions_met_count,
         )
 
     def accept_agreement(

@@ -225,13 +225,11 @@ class ConditionService(RedisClient):
         return ConditionResponse.model_validate(db_condition)
 
     def get_agreement_conditions(
-        self, agreement_ids: list[str], user_id: str
-    ) -> list[BatchConditionResponse]:
-        conditions = self.condition_repo.get_agreement_condition(agreement_ids, user_id)
+        self, agreement_id: str, user_id: str
+    ) -> list[ConditionResponse]:
+        conditions = self.condition_repo.get_agreement_condition(agreement_id, user_id)
 
-        return [
-            BatchConditionResponse.model_validate(condition) for condition in conditions
-        ]
+        return [ConditionResponse.model_validate(condition) for condition in conditions]
 
     def get_user_conditions(self, user_id: str) -> list[BatchConditionResponse]:
         return [
