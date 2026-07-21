@@ -81,6 +81,16 @@ class AssetUploadError(AppError):
         super().__init__(message=message, code="INTERNAL_SERVER_ERROR", status_code=500)
 
 
+class AssetApprovalError(AppError):
+    def __init__(self, message: str = "Failed to approve or reject asset"):
+        super().__init__(message=message, code="INTERNAL_SERVER_ERROR", status_code=500)
+
+
+class AssetNotFoundError(AppError):
+    def __init__(self, message: str = "Asset not found"):
+        super().__init__(message=message, code="NOT_FOUND", status_code=404)
+
+
 class AssetRetrievalError(AppError):
     def __init__(self, message: str = "Failed to retrieve assets"):
         super().__init__(message=message, code="INTERNAL_SERVER_ERROR", status_code=500)

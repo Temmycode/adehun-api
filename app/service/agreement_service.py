@@ -9,12 +9,14 @@ from app.exceptions import (
     AgreementAcceptanceError,
     AgreementCreationError,
     AgreementNotFoundError,
+    InvitationNotFoundError,
 )
 from app.models import Agreement, AgreementParticipant, Condition, Invitation
 from app.repository.agreement_repository import AgreementRepository
 from app.schemas.agreement_schema import (
     AgreementCreate,
     AgreementCreateResponse,
+    AgreementInvitationResponse,
     AgreementResponse,
     InvitationResponse,
 )
@@ -156,28 +158,48 @@ class AgreementService:
             self.agreement_repo.rollback()
             raise AgreementCreationError() from err
 
-    def get_agreement(self, agreement_id: str) -> AgreementResponse:
-        """Get agreement by id"""
+    def get_agreement(
+        self, agreement_id: str, user_id: str | None = None
+    ) -> AgreementResponse:
+        """Get agreement by id."""
         db_agreement = self.agreement_repo.get_by_id(agreement_id)
         if db_agreement is None:
             raise AgreementNotFoundError()
 
-        return AgreementResponse.model_validate(db_agreement)
+        response = self._to_agreement_response(db_agreement, 0, 0, user_id)
+        return response
 
     def get_all_user_agreements(self, user_id: str) -> list[AgreementResponse]:
-        """Get all agreements for a user"""
+        """Get all agreements for a user."""
 
         db_agreements = self.agreement_repo.get_user_agreements(user_id)
         return [
-            self._to_agreement_response(agr, con_ct, met_ct)
+            self._to_agreement_response(agr, con_ct, met_ct, user_id)
             for agr, con_ct, met_ct in db_agreements
         ]
 
-    @staticmethod
+    def get_agreement_invitation(
+        self, agreement_id: str, user_id: str, email: str
+    ) -> AgreementInvitationResponse:
+        """Get the invitation for an agreement if the current user can access it."""
+        agreement = self.agreement_repo.get_by_id(agreement_id)
+        if agreement is None:
+            raise AgreementNotFoundError()
+
+        invitation = self.agreement_repo.get_invitation_for_user(
+            agreement_id, user_id, email
+        )
+        if invitation is None:
+            raise InvitationNotFoundError("Invitation not found for this agreement")
+
+        return AgreementInvitationResponse.model_validate(invitation)
+
     def _to_agreement_response(
+        self,
         agreement: Agreement,
         condition_count: int,
         conditions_met_count: int,
+        user_id: str | None = None,
     ) -> AgreementResponse:
         """Map an Agreement (with loaded participants) to AgreementResponse."""
         depositor: AgreementParticipant | None = None
@@ -188,46 +210,136 @@ class AgreementService:
             elif p.role == "beneficiary":
                 beneficiary = p
 
-        return AgreementResponse(
+        response = AgreementResponse(
             id=agreement.id,
             title=agreement.title,
             description=agreement.description,
             amount=agreement.amount,
             status=agreement.status,
-            depositor=ParticipantResponse.model_validate(depositor)
-            if depositor
-            else None,
-            beneficiary=ParticipantResponse.model_validate(beneficiary)
-            if beneficiary
-            else None,
+            depositor=(
+                ParticipantResponse.model_validate(depositor) if depositor else None
+            ),
+            beneficiary=(
+                ParticipantResponse.model_validate(beneficiary) if beneficiary else None
+            ),
             created_at=agreement.created_at,
             condition_count=condition_count,
             conditions_met_count=conditions_met_count,
         )
+        if user_id is not None:
+            participant = self.agreement_repo.get_participant_for_user(
+                agreement.id, user_id
+            )
+            response.current_user_accepted = (
+                participant is not None
+                and participant.status == InvitationStatus.ACCEPTED.value
+            )
+
+        return response
 
     def accept_agreement(
         self, agreement_id: str, user_id: str, email: str
     ) -> AgreementResponse:
-        """Accept an agreement"""
+        """Accept an agreement without failing if the same user clicks twice."""
 
-        # Create the agreement participant\
         invitation = self.agreement_repo.get_invitation_by_agreement_id(
             email, agreement_id
         )
         if not invitation:
             raise AgreementAcceptanceError("No invitation found for this agreement")
 
-        participant = AgreementParticipant(
-            agreement_id=agreement_id,
-            user_id=user_id,
-            role=invitation.role,
+        participant = self.agreement_repo.get_participant_for_user(
+            agreement_id, user_id
         )
-        new_participant = self.agreement_repo.flush_participant(participant)
+        if participant is None:
+            participant = AgreementParticipant(
+                agreement_id=agreement_id,
+                user_id=user_id,
+                role=invitation.role,
+                status=InvitationStatus.ACCEPTED.value,
+            )
+            self.agreement_repo.session.add(participant)
+        else:
+            participant.status = InvitationStatus.ACCEPTED.value
+            self.agreement_repo.session.add(participant)
+
+        self.agreement_repo.session.commit()
+        self.agreement_repo.session.refresh(participant)
+
+        agreement = self.agreement_repo.get_by_id(agreement_id)
+        if agreement is None:
+            raise AgreementNotFoundError()
+
+        participants = self.agreement_repo.get_participants_for_agreement(agreement_id)
+        accepted_count = sum(
+            1 for p in participants if p.status == InvitationStatus.ACCEPTED.value
+        )
+        if accepted_count >= 2:
+            agreement.status = "active"
+            self.agreement_repo.session.add(agreement)
+            self.agreement_repo.session.commit()
+            self.agreement_repo.session.refresh(agreement)
+        else:
+            agreement.status = "pending"
+            self.agreement_repo.session.add(agreement)
+            self.agreement_repo.session.commit()
+            self.agreement_repo.session.refresh(agreement)
+
+        self.agreement_repo.invalidate_agreement_cache(
+            agreement_id,
+            [agreement.user_id, user_id],
+        )
 
         # Update the conditions that have the users email to use the participant's id
         self.agreement_repo.update_agreement_conditions_with_invitation(
-            agreement_id, invitation.id, new_participant.id
+            agreement_id, invitation.id, participant.id
         )
 
-        # fetch the new agreement data
-        return self.get_agreement(agreement_id)
+        return self.get_agreement(agreement_id, user_id)
+
+    def reject_agreement(
+        self, agreement_id: str, user_id: str, email: str
+    ) -> AgreementResponse:
+        """Reject an agreement and mark the participant as rejected."""
+
+        invitation = self.agreement_repo.get_invitation_by_agreement_id(
+            email, agreement_id
+        )
+        if not invitation:
+            raise AgreementAcceptanceError("No invitation found for this agreement")
+
+        participant = self.agreement_repo.get_participant_for_user(
+            agreement_id, user_id
+        )
+        if participant is None:
+            participant = AgreementParticipant(
+                agreement_id=agreement_id,
+                user_id=user_id,
+                role=invitation.role,
+                status=InvitationStatus.REJECTED.value,
+            )
+            self.agreement_repo.session.add(participant)
+        else:
+            participant.status = InvitationStatus.REJECTED.value
+            self.agreement_repo.session.add(participant)
+
+        self.agreement_repo.session.commit()
+        self.agreement_repo.session.refresh(participant)
+
+        agreement = self.agreement_repo.get_by_id(agreement_id)
+        if agreement is None:
+            raise AgreementNotFoundError()
+
+        agreement.status = "cancelled"
+        self.agreement_repo.session.add(agreement)
+        self.agreement_repo.session.commit()
+        self.agreement_repo.session.refresh(agreement)
+
+        self.agreement_repo.invalidate_agreement_cache(
+            agreement_id,
+            [agreement.user_id, user_id],
+        )
+
+        return self.get_agreement(agreement_id, user_id)
+
+    # def get_invitation  inv

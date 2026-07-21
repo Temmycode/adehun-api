@@ -16,6 +16,6 @@ def create_upload_signature(folder: str) -> SignedUploadResponse:
             "signature": signature,
             "api_key": settings.cloudinary_api_key,
             "cloud_name": settings.cloudinary_cloud_name,
-            "folder": folder,
+            "folder": f"adehun/{folder}",
         }
     )

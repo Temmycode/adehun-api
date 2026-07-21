@@ -92,7 +92,9 @@ class AgreementRepository(RedisClient):
             select(
                 Condition.agreement_id,
                 func.count(Condition.id),  # pyright: ignore[reportArgumentType]
-                func.sum(case((Condition.status == "approved", 1), else_=0)),  # pyright: ignore[reportArgumentType]
+                func.sum(
+                    case((Condition.status == "approved", 1), else_=0)
+                ),  # pyright: ignore[reportArgumentType]
             )
             .where(col(Condition.agreement_id).in_(agreement_ids))
             .group_by(Condition.agreement_id)
@@ -147,10 +149,68 @@ class AgreementRepository(RedisClient):
             )
         ).first()
 
+    def get_participant_for_user(
+        self, agreement_id: str, user_id: str
+    ) -> AgreementParticipant | None:
+        """Return the participant row for a user on an agreement."""
+        return self.session.exec(
+            select(AgreementParticipant).where(
+                AgreementParticipant.agreement_id == agreement_id,
+                AgreementParticipant.user_id == user_id,
+            )
+        ).first()
+
+    def get_participants_for_agreement(
+        self, agreement_id: str
+    ) -> list[AgreementParticipant]:
+        """Return all participant rows for an agreement."""
+        return list(
+            self.session.exec(
+                select(AgreementParticipant).where(
+                    AgreementParticipant.agreement_id == agreement_id
+                )
+            ).all()
+        )
+
     def get_invitation_by_agreement_id(
         self, email: str, agreement_id: str
     ) -> Invitation | None:
         """Return an invitation by its agreement ID."""
+        return self.session.exec(
+            select(Invitation).where(
+                Invitation.agreement_id == agreement_id,
+                Invitation.email == email,
+            )
+        ).first()
+
+    def get_invitation_for_user(
+        self, agreement_id: str, user_id: str, email: str
+    ) -> Invitation | None:
+        """Return an invitation for an agreement if the current user can access it."""
+        agreement = self.session.exec(
+            select(Agreement).where(Agreement.id == agreement_id)
+        ).first()
+        if agreement is None:
+            return None
+
+        is_creator = agreement.user_id == user_id
+        is_participant = (
+            self.session.exec(
+                select(AgreementParticipant).where(
+                    AgreementParticipant.agreement_id == agreement_id,
+                    AgreementParticipant.user_id == user_id,
+                )
+            ).first()
+            is not None
+        )
+        if not is_creator and not is_participant:
+            return None
+
+        if is_creator:
+            return self.session.exec(
+                select(Invitation).where(Invitation.agreement_id == agreement_id)
+            ).first()
+
         return self.session.exec(
             select(Invitation).where(
                 Invitation.agreement_id == agreement_id,
@@ -241,6 +301,14 @@ class AgreementRepository(RedisClient):
     def rollback(self) -> None:
         """Roll back the current transaction."""
         self.session.rollback()
+
+    def invalidate_agreement_cache(
+        self, agreement_id: str, user_ids: list[str]
+    ) -> None:
+        """Invalidate agreement and user-agreement cache entries after state changes."""
+        keys = [_agreement_key(agreement_id)]
+        keys.extend(_user_agreements_key(user_id) for user_id in user_ids if user_id)
+        self._cache_delete(*keys)
 
     def refresh(self, agreement: Agreement) -> None:
         """Refresh a student instance from DB and re-cache it."""

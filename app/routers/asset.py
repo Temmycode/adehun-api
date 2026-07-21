@@ -33,9 +33,7 @@ async def get_assets_for_agreement(
     _: ActiveUserDep,
 ):
     """Get assets for an agreement."""
-    return success_response(
-        data=asset_service.get_assets_for_agreement(agreement_id)
-    )
+    return success_response(data=asset_service.get_assets_for_agreement(agreement_id))
 
 
 @router.post(
@@ -61,6 +59,48 @@ async def add_asset_to_condition(
     )
 
 
+@router.post(
+    "/conditions/{condition_id}/assets/{asset_id}/approve",
+    response_model=APIResponse[AssetResponse],
+    responses={
+        403: {"model": ForbiddenResponse},
+        404: {"model": NotFoundResponse},
+    },
+)
+async def approve_asset(
+    request: Request,
+    condition_id: str,
+    asset_id: str,
+    asset_service: AssetServiceDep,
+    current_user: ActiveUserDep,
+):
+    """Approve an asset for a condition."""
+    return success_response(
+        data=asset_service.approve_asset(condition_id, asset_id, current_user.id)
+    )
+
+
+@router.post(
+    "/conditions/{condition_id}/assets/{asset_id}/reject",
+    response_model=APIResponse[AssetResponse],
+    responses={
+        403: {"model": ForbiddenResponse},
+        404: {"model": NotFoundResponse},
+    },
+)
+async def reject_asset(
+    request: Request,
+    condition_id: str,
+    asset_id: str,
+    asset_service: AssetServiceDep,
+    current_user: ActiveUserDep,
+):
+    """Reject an asset for a condition."""
+    return success_response(
+        data=asset_service.reject_asset(condition_id, asset_id, current_user.id)
+    )
+
+
 @router.get(
     "/conditions/{condition_id}/assets",
     response_model=APIResponse[list[AssetResponse]],
@@ -73,9 +113,7 @@ async def get_assets_for_condition(
     _: ActiveUserDep,
 ):
     """Get assets for a condition."""
-    return success_response(
-        data=asset_service.get_assets_for_condition(condition_id)
-    )
+    return success_response(data=asset_service.get_assets_for_condition(condition_id))
 
 
 @router.get(
@@ -89,6 +127,4 @@ async def get_upload_signature(
     _: ActiveUserDep,
 ):
     """Get upload signature for assets."""
-    return success_response(
-        data=asset_service.create_asset_signature(condition_id)
-    )
+    return success_response(data=asset_service.create_asset_signature(condition_id))

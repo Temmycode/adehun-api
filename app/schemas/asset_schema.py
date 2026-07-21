@@ -9,12 +9,16 @@ from app.schemas.participant_schema import ParticipantResponse
 class AssetFile:
     url: str
     type: str
+    name: str
+    size: float
 
 
 class AssetFileResponse(BaseModel):
     id: str
     url: str
     type: str
+    name: str
+    size: float
 
     model_config = {"from_attributes": True}
 

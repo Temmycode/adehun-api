@@ -19,6 +19,7 @@ from app.rate_limiting import limiter
 from app.schemas.agreement_schema import (
     AgreementCreate,
     AgreementCreateResponse,
+    AgreementInvitationResponse,
     AgreementResponse,
 )
 
@@ -107,7 +108,7 @@ async def create_agreement(
 
 
 @router.post(
-    "/{agreement_id}/",
+    "/{agreement_id}/accept",
     response_model=APIResponse[AgreementResponse],
     responses={
         401: {"model": UnauthorizedResponse},
@@ -130,30 +131,35 @@ async def accept_agreement(
         agreement_id, current_user.id, current_user.email
     )
 
-    participants = [
-        p for p in (agreement.depositor, agreement.beneficiary) if p is not None
-    ]
-    other_user_ids = [p.user.id for p in participants if p.user.id != current_user.id]
-
-    for uid in other_user_ids:
-        try:
-            notification_service.create_notification(
-                user_id=uid,
-                type=NotificationType.AGREEMENT_ACCEPTED,
-                title="Agreement Accepted",
-                message=f"{current_user.name} accepted the agreement",
-                metadata={"agreement_id": agreement.id},
-            )
-        except Exception:
-            logger.exception(
-                "failed to create agreement-accepted notification",
-                extra={"agreement_id": agreement.id, "recipient_id": uid},
-            )
-
-    # Agreement is complete once both depositor and beneficiary are present
+    # Notify only the other party once the agreement is accepted.
     if agreement.depositor and agreement.beneficiary:
-        all_user_ids = [p.user.id for p in participants]
-        for uid in all_user_ids:
+        recipient_ids = [
+            p.user.id
+            for p in (agreement.depositor, agreement.beneficiary)
+            if p.user.id != current_user.id
+        ]
+        for uid in recipient_ids:
+            try:
+                notification_service.create_notification(
+                    user_id=uid,
+                    type=NotificationType.AGREEMENT_ACCEPTED,
+                    title="Agreement Accepted",
+                    message=f"{current_user.name} accepted the agreement",
+                    metadata={"agreement_id": agreement.id},
+                )
+            except Exception:
+                logger.exception(
+                    "failed to create agreement-accepted notification",
+                    extra={"agreement_id": agreement.id, "recipient_id": uid},
+                )
+
+    if agreement.status == "active":
+        participant_ids = [
+            p.user.id
+            for p in (agreement.depositor, agreement.beneficiary)
+            if p is not None and p.user is not None
+        ]
+        for uid in participant_ids:
             try:
                 notification_service.create_notification(
                     user_id=uid,
@@ -165,6 +171,52 @@ async def accept_agreement(
             except Exception:
                 logger.exception(
                     "failed to create agreement-completed notification",
+                    extra={"agreement_id": agreement.id, "recipient_id": uid},
+                )
+
+    return success_response(data=agreement)
+
+
+@router.post(
+    "/{agreement_id}/reject",
+    response_model=APIResponse[AgreementResponse],
+    responses={
+        401: {"model": UnauthorizedResponse},
+        403: {"model": ForbiddenResponse},
+    },
+)
+@limiter.limit("10/minute")
+async def reject_agreement(
+    request: Request,
+    current_user: ActiveUserDep,
+    agreement_service: AgreementServiceDep,
+    notification_service: NotificationServiceDep,
+    agreement_id: str,
+):
+    """Reject an agreement."""
+
+    agreement = agreement_service.reject_agreement(
+        agreement_id, current_user.id, current_user.email
+    )
+
+    if agreement.depositor and agreement.beneficiary:
+        recipient_ids = [
+            p.user.id
+            for p in (agreement.depositor, agreement.beneficiary)
+            if p.user.id != current_user.id
+        ]
+        for uid in recipient_ids:
+            try:
+                notification_service.create_notification(
+                    user_id=uid,
+                    type=NotificationType.AGREEMENT_DECLINED,
+                    title="Agreement Declined",
+                    message=f"{current_user.name} declined the agreement",
+                    metadata={"agreement_id": agreement.id},
+                )
+            except Exception:
+                logger.exception(
+                    "failed to create agreement-declined notification",
                     extra={"agreement_id": agreement.id, "recipient_id": uid},
                 )
 
@@ -191,3 +243,31 @@ async def get_agreement(
     """
 
     return success_response(data=agreement_service.get_agreement(agreement_id))
+
+
+@router.get(
+    "/{agreement_id}/invitation",
+    response_model=APIResponse[AgreementInvitationResponse],
+    responses={
+        401: {"model": UnauthorizedResponse},
+        403: {"model": ForbiddenResponse},
+    },
+)
+@limiter.limit("10/minute")
+async def get_agreement_invitation(
+    request: Request,
+    current_user: ActiveUserDep,
+    agreement_service: AgreementServiceDep,
+    agreement_id: str,
+):
+    """
+    Get the invitation details for an agreement.
+    This is useful for the client to display the pending invitation without
+    relying on cached agreement data.
+    """
+
+    return success_response(
+        data=agreement_service.get_agreement_invitation(
+            agreement_id, current_user.id, current_user.email
+        )
+    )

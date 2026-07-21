@@ -43,6 +43,7 @@ class AgreementResponse(BaseModel):
     created_at: datetime
     condition_count: int | None = 0
     conditions_met_count: int | None = 0
+    current_user_accepted: bool = False
 
     model_config = {"from_attributes": True}
 

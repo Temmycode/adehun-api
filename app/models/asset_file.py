@@ -13,6 +13,8 @@ class AssetFile(SQLModel, table=True):
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     url: str
     type: str  # image/pdf/zip/video/link
+    name: str
+    size: float
 
     asset: "Asset" = Relationship(
         back_populates="file", sa_relationship_kwargs={"lazy": "selectin"}
