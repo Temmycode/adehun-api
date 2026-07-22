@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 from app.logging import get_logger
 from typing import Annotated, Any, Generator
 
@@ -60,6 +61,14 @@ class RedisClient:
         """Serialize a SQLModel/dict to a JSON string."""
         if hasattr(obj, "model_dump"):
             return json.dumps(obj.model_dump(mode="json"))
+
+        def _default(o: Any) -> Any:
+            if isinstance(o, Decimal):
+                return str(o)
+            raise TypeError(
+                f"Object of type {o.__class__.__name__} is not JSON serializable"
+            )
+
         return json.dumps(obj)
 
     def _cache_get(self, key: str) -> Any | None:

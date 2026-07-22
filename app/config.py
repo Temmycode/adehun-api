@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     google_application_credentials: str | None = None
     frontend_url: str
     debug: bool = True
+    paystack_test_public_key: str
+    paystack_test_secret_key: str
 
     model_config = {
         "env_file": ".env.local",

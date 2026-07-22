@@ -11,6 +11,7 @@ from app.repository.condition_repository import ConditionRepository
 from app.repository.notification_repository import NotificationRepository
 from app.repository.stats_repository import StatsRepository
 from app.repository.user_repository import UserRepository
+from app.repository.wallet_repository import WalletRepository
 from app.service.agreement_service import AgreementService
 from app.service.asset_service import AssetService
 from app.service.auth_service import AuthService
@@ -18,6 +19,7 @@ from app.service.condition_service import ConditionService
 from app.service.notification_service import NotificationService
 from app.service.stats_service import StatsService
 from app.service.user_service import UserService
+from app.service.wallet_service import WalletService
 from app.token_service import get_active_user, get_current_user
 
 
@@ -132,3 +134,17 @@ def get_notification_service(
 NotificationServiceDep = Annotated[
     NotificationService, Depends(get_notification_service)
 ]
+
+
+def get_wallet_repository(session: SessionDep, client: RedisDep) -> WalletRepository:
+    return WalletRepository(session, client)
+
+
+WalletRepositoryDep = Annotated[WalletRepository, Depends(get_wallet_repository)]
+
+
+def get_wallet_service(repo: WalletRepositoryDep) -> WalletService:
+    return WalletService(repo)
+
+
+WalletServiceDep = Annotated[WalletService, Depends(get_wallet_service)]

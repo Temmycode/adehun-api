@@ -94,3 +94,8 @@ class AssetNotFoundError(AppError):
 class AssetRetrievalError(AppError):
     def __init__(self, message: str = "Failed to retrieve assets"):
         super().__init__(message=message, code="INTERNAL_SERVER_ERROR", status_code=500)
+
+
+class WalletNotFoundError(AppError):
+    def __init__(self, message: str = "Wallet not found"):
+        super().__init__(message=message, code="NOT_FOUND", status_code=404)

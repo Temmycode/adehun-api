@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from .agreement_participant import AgreementParticipant
     from .invitation import Invitation
     from .notification import Notification
+    from .wallet import Wallet
 
 
 class User(SQLModel, table=True):
@@ -28,3 +29,4 @@ class User(SQLModel, table=True):
     )
     agreements: list["Agreement"] = Relationship(back_populates="user")
     notifications: list["Notification"] = Relationship(back_populates="user")
+    wallet: "Wallet" = Relationship(back_populates="user")

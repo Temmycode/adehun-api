@@ -4,6 +4,7 @@
 import json
 from contextlib import asynccontextmanager
 
+from app.routers import wallet
 import cloudinary
 from fastapi.exceptions import RequestValidationError
 import firebase_admin
@@ -130,6 +131,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(user.router)
+app.include_router(wallet.router)
 app.include_router(agreement.router)
 app.include_router(condition.router)
 app.include_router(asset.router)

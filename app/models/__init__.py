@@ -7,6 +7,8 @@ from .invitation import Invitation
 from .notification import Notification
 from .transaction import Transaction
 from .user import User
+from .wallet import Wallet
+from .paystack_transaction import PaystackTransaction
 
 __all__ = [
     "Agreement",
@@ -18,4 +20,6 @@ __all__ = [
     "User",
     "Invitation",
     "Notification",
+    "Wallet",
+    "PaystackTransaction",
 ]
