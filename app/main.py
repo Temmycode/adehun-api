@@ -49,12 +49,17 @@ cloudinary.config(
 )
 origins = ["*"]
 
-# Firebase Admin SDK initialization
-with open("./secrets/firebase.json") as account_file:
-    service_account = json.load(account_file)
 
-cred = credentials.Certificate(service_account)
-firebase_admin.initialize_app(cred)
+# Firebase Admin SDK initialization
+if not firebase_admin._apps:
+    try:
+        credentials.Certificate(json.loads(settings.firebase_service_account_json))
+        logger.info("Firebase Admin initialized")
+    except Exception:
+        logger.error(
+            "Firebase Admin init failed — push notifications disabled",
+            exc_info=True,
+        )
 
 app = FastAPI(title="Adehun API", version="1.0.0", lifespan=lifespan)
 app.state.limiter = limiter
