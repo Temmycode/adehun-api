@@ -53,7 +53,10 @@ origins = ["*"]
 # Firebase Admin SDK initialization
 if not firebase_admin._apps:
     try:
-        credentials.Certificate(json.loads(settings.firebase_service_account_json))
+        credentials = credentials.Certificate(
+            json.loads(settings.firebase_service_account_json)
+        )
+        firebase_admin.initialize_app(credentials)
         logger.info("Firebase Admin initialized")
     except Exception:
         logger.error(
