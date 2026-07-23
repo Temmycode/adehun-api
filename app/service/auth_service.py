@@ -2,7 +2,7 @@ from app.logging import get_logger
 
 from firebase_admin import auth
 
-from app import token_service
+from app.service import token_service
 from app.exceptions import InvitationNotFoundError, UserNotFoundError
 from app.models import User
 from app.repository.user_repository import UserRepository

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlmodel import select
 
-from app import token_service
+from app.service import token_service
 from app.database import SessionDep
 from app.exceptions import BadRequestError, UserNotFoundError
 from app.models import User
