@@ -1,10 +1,11 @@
 import uuid
-from decimal import Decimal
 import httpx
-from app.exceptions import AppError
+from app.exceptions import AppError, PaystackTransactionNotFoundError
 from app.repository.wallet_repository import WalletRepository
 from app.config import settings
 from app.schemas.wallet_schema import WalletCodeResponse, WalletCreate
+from app.realtime.manager import ws_manager
+from app.models.paystack_transaction import TransactionStatus
 
 BASE_URL = "https://api.paystack.co"
 headers = {
@@ -47,5 +48,43 @@ class WalletService:
                 status_code=401,
             )
 
-    def update_wallet_fund(self, amount: Decimal, user_id: str):
-        return self.wallet_repo.update_wallet_amount(amount, user_id)
+    async def update_wallet_fund(self, payload: dict):
+        data = payload.get("data", {})
+        transaction_reference = data.get("reference")
+        amount_paid_kobo = data.get("amount")
+
+        transaction = self.wallet_repo.get_paystack_transaction(transaction_reference)
+
+        if not transaction:
+            raise PaystackTransactionNotFoundError()
+
+        if transaction.status != TransactionStatus.PENDING:
+            return {"status": "success", "message": "Already processed"}
+
+        expected_kobo = int(transaction.amount * 100)
+        if amount_paid_kobo < expected_kobo:
+            transaction.status = TransactionStatus.FAILED
+            transaction.gateway_response = "Underpaid"
+            transaction.raw_webhook_data = payload
+            self.wallet_repo.add(transaction)
+            self.wallet_repo.flush()
+            return {"status": "success", "message": "Underpayment recorded"}
+
+        # 7. Update the transaction with Paystack's exact data
+        transaction.status = TransactionStatus.SUCCESS
+        transaction.paystack_id = data.get("id")
+        transaction.payment_channel = data.get("channel")  # e.g., 'card'
+        transaction.gateway_response = data.get("gateway_response")
+        transaction.raw_webhook_data = payload
+
+        wallet = self.wallet_repo.update_wallet_amount(
+            transaction.amount, transaction.user_id
+        )
+        await ws_manager.send_to_user(
+            transaction.user_id,
+            {
+                "type": "WALLET_CREDITED",
+                "amount": float(transaction.amount),
+                "new_balance": float(wallet.escrow_balance),
+            },
+        )

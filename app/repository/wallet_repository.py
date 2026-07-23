@@ -1,11 +1,10 @@
 from redis import Redis
 from decimal import Decimal
-from app.core.response import NotFoundResponse
 from app.exceptions import WalletNotFoundError
 from app.logging import get_logger
 from sqlmodel import Session, select
 from app.redis import RedisClient
-from app.models import Wallet
+from app.models import Wallet, PaystackTransaction
 
 logger = get_logger(__name__)
 
@@ -56,7 +55,7 @@ class WalletRepository(RedisClient):
 
         if user_wallet is None:
             # Create a wallet for the user
-            user_wallet = Wallet(user_id=user_id, amount=amount)
+            user_wallet = Wallet(user_id=user_id, escrow_balance=amount)
         else:
             user_wallet.escrow_balance = user_wallet.escrow_balance + amount
 
@@ -82,3 +81,18 @@ class WalletRepository(RedisClient):
         self._cache_set(key, user_wallet, _TTL_USER_WALLET)
 
         return user_wallet
+
+    def get_paystack_transaction(
+        self, transaction_reference: str
+    ) -> PaystackTransaction | None:
+        return self.session.exec(
+            select(PaystackTransaction)
+            .where(PaystackTransaction.reference == transaction_reference)
+            .with_for_update()
+        ).first()
+
+    def add(self, data):
+        self.session.add(data)
+
+    def flush(self):
+        self.session.flush()

@@ -99,3 +99,8 @@ class AssetRetrievalError(AppError):
 class WalletNotFoundError(AppError):
     def __init__(self, message: str = "Wallet not found"):
         super().__init__(message=message, code="NOT_FOUND", status_code=404)
+
+
+class PaystackTransactionNotFoundError(AppError):
+    def __init__(self, message: str = "Paystack Transaction not found"):
+        super().__init__(message=message, code="NOT_FOUND", status_code=404)

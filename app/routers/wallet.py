@@ -1,22 +1,23 @@
 import hmac
 import json
 import hashlib
-from fastapi import APIRouter, Request, HTTPException, status, Header
-from app.database import SessionDep
+from fastapi import APIRouter, Request, HTTPException, WebSocket, status, Header
 from app.dependencies import ActiveUserDep, WalletServiceDep
 from app.exceptions import AppError
-from app.rate_limiting import limiter
 from app.core.response import (
     APIResponse,
     InternalServerErrorResponse,
     UnauthorizedResponse,
     success_response,
 )
+from app.rate_limiting import limiter
 from app.logging import get_logger
 from app.schemas.wallet_schema import WalletCodeResponse, WalletCreate
 from app.config import settings
-from app.models import PaystackTransaction, Wallet
-from app.models.paystack_transaction import TransactionStatus
+from app.service.token_service import get_user_id_from_ws
+from app.realtime.manager import ws_manager
+from app.exceptions import PaystackTransactionNotFoundError
+
 
 logger = get_logger(__name__)
 
@@ -50,10 +51,25 @@ async def fund_wallet(
         raise HTTPException(status_code=err.status_code, detail=err.message)
 
 
+@router.websocket("/ws")
+async def wallet_websocket(websocket: WebSocket):
+    user_id = get_user_id_from_ws(websocket)
+    if not user_id:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    await ws_manager.connect(user_id, websocket)
+
+    try:
+        while True:
+            await websocket.receive_text()
+    except Exception:
+        ws_manager.disconnect(user_id, websocket)
+
+
 @router.post("/webhook/paystack")
 async def paystack_webhook(
     request: Request,
-    session: SessionDep,
     wallet_service: WalletServiceDep,
     x_paystack_signature: str = Header(None),
 ):
@@ -81,46 +97,9 @@ async def paystack_webhook(
         # Acknowledge other events immediately without processing
         return {"status": "success", "message": "Event ignored"}
 
-    data = payload.get("data", {})
-    transaction_reference = data.get("reference")
-    amount_paid_kobo = data.get("amount")
-
-    # 5. Look up the transaction in your database using the reference
-    transaction = (
-        session.query(PaystackTransaction)
-        .filter_by(reference=transaction_reference)
-        .first()
-    )
-
-    if not transaction:
-        # Note: Always return 200 to Paystack even if you can't find it locally,
-        # otherwise Paystack will keep spamming your server with retries.
+    try:
+        await wallet_service.update_wallet_fund(payload)
+    except PaystackTransactionNotFoundError:
         return {"status": "success", "message": "Transaction not found locally"}
 
-    # Idempotency check: If it's already processed, ignore safely
-    if transaction.status != TransactionStatus.PENDING:
-        return {"status": "success", "message": "Already processed"}
-
-    # 6. Verify the amount matches what you expected (protects against partial payments)
-    # transaction.amount is in Naira (Decimal), Paystack amount is in Kobo (int)
-    expected_kobo = int(transaction.amount * 100)
-    if amount_paid_kobo < expected_kobo:
-        transaction.status = TransactionStatus.FAILED
-        transaction.gateway_response = "Underpaid"
-        transaction.raw_webhook_data = payload
-        session.add(transaction)
-        session.commit()
-        return {"status": "success", "message": "Underpayment recorded"}
-
-    # 7. Update the transaction with Paystack's exact data
-    transaction.status = TransactionStatus.SUCCESS
-    transaction.paystack_id = data.get("id")
-    transaction.payment_channel = data.get("channel")  # e.g., 'card'
-    transaction.gateway_response = data.get("gateway_response")
-    transaction.raw_webhook_data = payload
-
-    # 8. Update the user's Escrow Wallet balance
-    wallet_service.update_wallet_fund(transaction.amount, transaction.user_id)
-
-    # 10. Return 200 OK fast so Paystack knows you received it
     return {"status": "success"}

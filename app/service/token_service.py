@@ -2,14 +2,16 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
 
 import jwt
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, WebSocket
 from fastapi.security import OAuth2PasswordBearer
 
 from app.database import SessionDep
 from app.models import User
 
-from .config import settings
+from app.config import settings
+from app.logging import get_logger
 
+logger = get_logger(__name__)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/dev-login")
 
 SECRET_KEY = settings.secret_key
@@ -122,3 +124,24 @@ def get_active_user(
         )
 
     return user
+
+
+# -------------------------------------------------------------------
+# WebSocket auth helper
+# -------------------------------------------------------------------
+
+
+def get_user_id_from_ws(websocket: WebSocket) -> str | None:
+    token = websocket.query_params.get("token")
+    if not token:
+        logger.info("WebSocket connection missing token")
+        return None
+
+    try:
+        payload = verify_token(token, expected_type="access")
+        user_id = payload["sub"]
+        logger.info("WebSocket authenticated", extra={"user_id": user_id})
+        return user_id
+    except HTTPException:
+        logger.warning("WebSocket token verification failed")
+        return None
