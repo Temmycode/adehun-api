@@ -22,8 +22,6 @@ class TransactionType(str, Enum):
 
 
 class PaystackTransaction(SQLModel, table=True):
-    __tablename__ = "paystack_transactions"
-
     # Internal IDs
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
     user_id: str = Field(foreign_key="user.id", index=True)

@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     firebase_service_account_json: str
 
     model_config = {
-        "env_file": ".env.local",
+        "env_file": ".env.production",
     }
 
 
