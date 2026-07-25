@@ -2,10 +2,10 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional  # noqa: UP035
 
-from sqlmodel import SQLModel, Field, Column, String, DateTime
-from sqlalchemy import Numeric, JSON
+from sqlalchemy import JSON, Numeric
+from sqlmodel import Column, DateTime, Field, SQLModel
 
 
 class TransactionStatus(str, Enum):
@@ -22,13 +22,14 @@ class TransactionType(str, Enum):
 
 
 class PaystackTransaction(SQLModel, table=True):
+    __tablename__ = "paystack_transaction"
     # Internal IDs
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
     user_id: str = Field(foreign_key="user.id", index=True)
 
     # Core Transaction Identifiers
     reference: str = Field(unique=True, index=True, max_length=100)
-    paystack_id: Optional[int] = Field(
+    paystack_id: "Optional[int]" = Field(
         default=None, index=True
     )  # Paystack's internal ID from the webhook
 
