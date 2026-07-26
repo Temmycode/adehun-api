@@ -33,6 +33,7 @@ class WalletService:
             "email": user_email,
             "amount": amount_in_kobo,
             "reference": generate_fund_reference(user_id),
+            "channels": [wallet_data.channel],
         }
 
         async with httpx.AsyncClient() as client:

@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 class WalletCreate(BaseModel):
     amount: Decimal
+    channel: str
 
 
 class WalletCodeResponse(BaseModel):
