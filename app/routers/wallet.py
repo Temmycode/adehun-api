@@ -63,6 +63,14 @@ async def wallet_websocket(websocket: WebSocket):
     try:
         while True:
             await websocket.receive_text()
+
+            await websocket.send_json(
+                {
+                    "type": "WALLET_CREDITED",
+                    "amount": float(0),
+                    "new_balance": float(0),
+                },
+            )
     except Exception:
         ws_manager.disconnect(user_id, websocket)
 
