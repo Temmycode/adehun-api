@@ -50,7 +50,7 @@ class PaystackTransaction(SQLModel, table=True):
 
     # Store the raw webhook data here. If a dispute happens, you have the exact payload.
     raw_webhook_data: Optional[Dict[str, Any]] = Field(
-        default=dict, sa_column=Column(JSON)
+        default_factory=dict, sa_column=Column(JSON)
     )
 
     # Timestamps
