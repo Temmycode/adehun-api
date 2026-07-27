@@ -89,3 +89,13 @@ class WalletService:
                 "new_balance": float(wallet.escrow_balance),
             },
         )
+
+    def get_wallet_data(self, user_id: str) -> dict:
+        wallet = self.wallet_repo.get_user_wallet(user_id)
+        return {
+            "type": "WALLET_STATE",
+            "new_balance": float(wallet.escrow_balance)
+            if wallet is not None
+            else float("0.00"),
+            "amount": float("0.00"),
+        }

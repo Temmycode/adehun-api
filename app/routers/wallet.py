@@ -52,7 +52,7 @@ async def fund_wallet(
 
 
 @router.websocket("/ws")
-async def wallet_websocket(websocket: WebSocket):
+async def wallet_websocket(websocket: WebSocket, wallet_service: WalletServiceDep):
     user_id = get_user_id_from_ws(websocket)
     if not user_id:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
@@ -60,17 +60,14 @@ async def wallet_websocket(websocket: WebSocket):
 
     await ws_manager.connect(user_id, websocket)
 
+    wallet_data = wallet_service.get_wallet_data(user_id)
+
+    await websocket.send_json(wallet_data)
+
     try:
         while True:
             await websocket.receive_text()
 
-            await websocket.send_json(
-                {
-                    "type": "WALLET_CREDITED",
-                    "amount": float(0),
-                    "new_balance": float(0),
-                },
-            )
     except Exception:
         ws_manager.disconnect(user_id, websocket)
 
