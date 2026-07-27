@@ -14,5 +14,6 @@ class Wallet(SQLModel, table=True):
     user_id: str = Field(foreign_key="user.id")
     escrow_balance: Decimal = Field(default="0.00", nullable=False)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     user: "User" = Relationship(back_populates="wallet")

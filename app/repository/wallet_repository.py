@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from redis import Redis
 from decimal import Decimal
 from app.exceptions import WalletNotFoundError
@@ -55,7 +57,11 @@ class WalletRepository(RedisClient):
 
         if user_wallet is None:
             # Create a wallet for the user
-            user_wallet = Wallet(user_id=user_id, escrow_balance=amount)
+            user_wallet = Wallet(
+                user_id=user_id,
+                escrow_balance=amount,
+                updated_at=datetime.now(timezone.utc),
+            )
         else:
             user_wallet.escrow_balance = user_wallet.escrow_balance + amount
 

@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import uuid
 import httpx
 from app.exceptions import AppError, PaystackTransactionNotFoundError
@@ -94,7 +95,7 @@ class WalletService:
     def get_wallet_data(self, user_id: str) -> dict:
         wallet = self.wallet_repo.get_user_wallet(user_id)
         if wallet is None:
-            wallet = Wallet(user_id=user_id)
+            wallet = Wallet(user_id=user_id, updated_at=datetime.now(timezone.utc))
 
         self.wallet_repo.add(wallet)
         self.wallet_repo.commit()
