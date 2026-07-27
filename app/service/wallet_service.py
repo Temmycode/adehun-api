@@ -1,6 +1,7 @@
 import uuid
 import httpx
 from app.exceptions import AppError, PaystackTransactionNotFoundError
+from app.models.wallet import Wallet
 from app.repository.wallet_repository import WalletRepository
 from app.config import settings
 from app.schemas.wallet_schema import WalletCodeResponse, WalletCreate
@@ -92,6 +93,13 @@ class WalletService:
 
     def get_wallet_data(self, user_id: str) -> dict:
         wallet = self.wallet_repo.get_user_wallet(user_id)
+        if wallet is None:
+            wallet = Wallet(user_id=user_id)
+
+        self.wallet_repo.add(wallet)
+        self.wallet_repo.commit()
+        self.wallet_repo.refresh(wallet)
+
         return {
             "type": "WALLET_STATE",
             "new_balance": float(wallet.escrow_balance)

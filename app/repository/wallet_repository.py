@@ -96,3 +96,9 @@ class WalletRepository(RedisClient):
 
     def flush(self):
         self.session.flush()
+
+    def commit(self):
+        self.session.commit()
+
+    def refresh(self, value):
+        self.session.refresh(value)
