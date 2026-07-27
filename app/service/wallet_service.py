@@ -97,9 +97,9 @@ class WalletService:
         if wallet is None:
             wallet = Wallet(user_id=user_id, updated_at=datetime.now(timezone.utc))
 
-        self.wallet_repo.add(wallet)
-        self.wallet_repo.commit()
-        self.wallet_repo.refresh(wallet)
+            self.wallet_repo.add(wallet)
+            self.wallet_repo.commit()
+            self.wallet_repo.refresh(wallet)
 
         return {
             "type": "WALLET_STATE",
