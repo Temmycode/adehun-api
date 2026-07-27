@@ -78,8 +78,18 @@ async def paystack_webhook(
     wallet_service: WalletServiceDep,
     x_paystack_signature: str = Header(None),
 ):
+    logger.info("paystack webhook received")
+
     # 1. Get the raw body (required for HMAC signature)
     raw_body = await request.body()
+
+    logger.debug(
+        "received webhook body",
+        extra={
+            "body_size": len(raw_body),
+            "signature_present": x_paystack_signature is not None,
+        },
+    )
 
     # 2. Compute the HMAC SHA512 signature
     computed_signature = hmac.new(
@@ -88,23 +98,93 @@ async def paystack_webhook(
         digestmod=hashlib.sha512,
     ).hexdigest()
 
+    logger.debug("computed webhook signature")
+
     # 3. Compare signatures
     if computed_signature != x_paystack_signature:
+        logger.warning(
+            "paystack signature verification failed",
+            extra={
+                "body_size": len(raw_body),
+            },
+        )
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid signature",
         )
 
+    logger.info("paystack signature verified")
+
     # 4. Parse the JSON body safely now that it's verified
-    payload = json.loads(raw_body)
+    try:
+        payload = json.loads(raw_body)
+    except Exception:
+        logger.exception("failed to parse paystack webhook payload")
+        raise
+
     event_type = payload.get("event")
+    reference = payload.get("data", {}).get("reference")
+
+    logger.info(
+        "paystack event received",
+        extra={
+            "event_type": event_type,
+            "reference": reference,
+        },
+    )
 
     if event_type != "charge.success":
-        # Acknowledge other events immediately without processing
+        logger.debug(
+            "ignoring paystack event",
+            extra={
+                "event_type": event_type,
+                "reference": reference,
+            },
+        )
         return {"status": "success", "message": "Event ignored"}
+
+    logger.info(
+        "processing charge.success event",
+        extra={
+            "reference": reference,
+        },
+    )
 
     try:
         await wallet_service.update_wallet_fund(payload)
+
+        logger.info(
+            "wallet updated successfully",
+            extra={
+                "reference": reference,
+            },
+        )
     except PaystackTransactionNotFoundError:
-        return {"status": "success", "message": "Transaction not found locally"}
+        logger.warning(
+            "paystack transaction not found locally",
+            extra={
+                "reference": reference,
+            },
+        )
+        return {
+            "status": "success",
+            "message": "Transaction not found locally",
+        }
+    except Exception:
+        logger.exception(
+            "unexpected error while processing paystack webhook",
+            extra={
+                "reference": reference,
+            },
+        )
+        raise
+
+    logger.info(
+        "paystack webhook processed successfully",
+        extra={
+            "reference": reference,
+            "event_type": event_type,
+        },
+    )
 
     return {"status": "success"}
