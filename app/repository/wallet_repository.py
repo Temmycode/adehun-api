@@ -37,19 +37,19 @@ class WalletRepository(RedisClient):
         super().__init__(client)
 
     def get_user_wallet(self, user_id: str) -> Wallet | None:
-        key = _user_wallet_key(user_id)
-        cache = self._cache_get(key)
-        if cache is not None:
-            logger.debug("cache hit for user wallet", extra={"user_id": user_id})
-            return Wallet.model_validate(cache)
+        # key = _user_wallet_key(user_id)
+        # cache = self._cache_get(key)
+        # if cache is not None:
+        #     logger.debug("cache hit for user wallet", extra={"user_id": user_id})
+        #     return Wallet.model_validate(cache)
 
         wallet = self.session.exec(
             select(Wallet).where(Wallet.user_id == user_id)
         ).first()
-        if wallet:
-            self._cache_set(key, wallet, _TTL_USER_WALLET)
-        else:
-            logger.info("user wallet not found", extra={"user_id": user_id})
+        # if wallet:
+        #     self._cache_set(key, wallet, _TTL_USER_WALLET)
+        # else:
+        #     logger.info("user wallet not found", extra={"user_id": user_id})
         return wallet
 
     def create_paystack_transaction(
