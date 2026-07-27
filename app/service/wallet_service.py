@@ -31,10 +31,11 @@ class WalletService:
         """Fund the user's wallet"""
         url = f"{BASE_URL}/transaction/initialize"
         amount_in_kobo = int(wallet_data.amount * 100)
+        reference = generate_fund_reference(user_id)
         payload = {
             "email": user_email,
             "amount": amount_in_kobo,
-            "reference": generate_fund_reference(user_id),
+            "reference": reference,
             "channels": [wallet_data.channel],
         }
 
@@ -43,6 +44,11 @@ class WalletService:
             data = response.json()
 
             if response.status_code == 200 and data.get("status"):
+                # create paystack transaction
+
+                self.wallet_repo.create_paystack_transaction(
+                    wallet_data.amount, reference, user_id, wallet_data.channel
+                )
                 return WalletCodeResponse(access_code=data["data"]["access_code"])
 
             raise AppError(
