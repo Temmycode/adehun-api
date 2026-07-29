@@ -231,6 +231,18 @@ class ConditionService(RedisClient):
 
         return [ConditionResponse.model_validate(condition) for condition in conditions]
 
+    def all_conditions_approved(self, agreement_id: str, user_id: str) -> bool:
+        """Whether every condition on the agreement has been approved.
+
+        This is what triggers the automatic escrow release. An agreement with no
+        conditions at all does not auto-release — there would be nothing holding
+        the money, and releasing on that basis would be a surprise.
+        """
+        conditions = self.condition_repo.get_agreement_condition(agreement_id, user_id)
+        if not conditions:
+            return False
+        return all(condition.status == "approved" for condition in conditions)
+
     def get_user_conditions(self, user_id: str) -> list[BatchConditionResponse]:
         return [
             BatchConditionResponse.model_validate(condition)

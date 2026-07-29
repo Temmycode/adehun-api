@@ -14,8 +14,11 @@ from app.dependencies import (
     AgreementServiceDep,
     ConditionServiceDep,
     NotificationServiceDep,
+    TransactionServiceDep,
+    WalletServiceDep,
 )
 from app.logging import get_logger
+from app.routers.agreement import perform_escrow_release
 from app.rate_limiting import limiter
 from app.schemas.conditions_schema import (
     BatchConditionResponse,
@@ -78,6 +81,53 @@ def _notify_agreement_participants(
                     "type": notification_type.value,
                 },
             )
+
+
+def _release_escrow_if_ready(
+    *,
+    agreement_id: str,
+    user_id: str,
+    condition_service,
+    agreement_service,
+    wallet_service,
+    transaction_service,
+    notification_service,
+) -> None:
+    """Release the escrow once every condition has been approved.
+
+    Orchestrated here rather than inside ConditionService, per the CLAUDE.md
+    rule that services never call other feature services.
+
+    This runs after `approve_condition` has already committed, so it is a
+    separate transaction and can fail on its own. That is deliberate and safe:
+    a failure here never undoes the approval, and the release is idempotent on
+    `esc_rel_{agreement_id}` — so `POST /agreements/{id}/release` re-runs it
+    cleanly, and a second approval attempt would too.
+    """
+    try:
+        if not transaction_service.is_agreement_funded(agreement_id):
+            return
+        if transaction_service.is_agreement_released(agreement_id):
+            return
+        if not condition_service.all_conditions_approved(agreement_id, user_id):
+            return
+
+        perform_escrow_release(
+            agreement_id,
+            agreement_service,
+            wallet_service,
+            notification_service,
+        )
+        logger.info(
+            "escrow released automatically on final condition approval",
+            extra={"agreement_id": agreement_id},
+        )
+    except Exception:
+        logger.exception(
+            "automatic escrow release failed; "
+            "retry via POST /agreements/{id}/release",
+            extra={"agreement_id": agreement_id},
+        )
 
 
 @router.post(
@@ -163,22 +213,40 @@ async def approve_condition(
     condition_service: ConditionServiceDep,
     agreement_service: AgreementServiceDep,
     notification_service: NotificationServiceDep,
+    wallet_service: WalletServiceDep,
+    transaction_service: TransactionServiceDep,
 ):
-    """Approve a condition."""
+    """Approve a condition.
+
+    Approving the last outstanding condition releases the escrow automatically:
+    the money is what the conditions were holding, so there is nothing left to
+    wait for.
+    """
     condition = condition_service.approve_condition(condition_id, current_user.id)
+    agreement_id = condition.created_by_participant.agreement_id
 
     _notify_agreement_participants(
         notification_service,
         agreement_service,
-        agreement_id=condition.created_by_participant.agreement_id,
+        agreement_id=agreement_id,
         acting_user_id=current_user.id,
         notification_type=NotificationType.CONDITION_UPDATED,
         title="Condition Approved",
         message=f"{current_user.name} approved a condition",
         metadata={
-            "agreement_id": condition.created_by_participant.agreement_id,
+            "agreement_id": agreement_id,
             "condition_id": condition.id,
         },
+    )
+
+    _release_escrow_if_ready(
+        agreement_id=agreement_id,
+        user_id=current_user.id,
+        condition_service=condition_service,
+        agreement_service=agreement_service,
+        wallet_service=wallet_service,
+        transaction_service=transaction_service,
+        notification_service=notification_service,
     )
 
     return success_response(data=condition)

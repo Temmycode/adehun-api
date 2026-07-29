@@ -4,7 +4,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any, Dict, Optional  # noqa: UP035
 
-from sqlalchemy import JSON, Numeric
+from sqlalchemy import JSON, BigInteger, Numeric, String
 from sqlmodel import Column, DateTime, Field, SQLModel
 
 
@@ -18,6 +18,7 @@ class TransactionStatus(str, Enum):
 class TransactionType(str, Enum):
     ESCROW_DEPOSIT = "ESCROW_DEPOSIT"  # Buyer paying in
     ESCROW_PAYOUT = "ESCROW_PAYOUT"  # Releasing to seller
+    ESCROW_REFUND = "ESCROW_REFUND"  # Returning escrow to the depositor
     WITHDRAWAL = "WITHDRAWAL"  # User withdrawing to bank
 
 
@@ -29,9 +30,11 @@ class PaystackTransaction(SQLModel, table=True):
 
     # Core Transaction Identifiers
     reference: str = Field(unique=True, index=True, max_length=100)
+    # Paystack's internal ID from the webhook. BigInteger — these already
+    # exceed 2**31, so a plain Integer column would overflow.
     paystack_id: "Optional[int]" = Field(
-        default=None, index=True
-    )  # Paystack's internal ID from the webhook
+        default=None, sa_column=Column(BigInteger, nullable=True, index=True)
+    )
 
     # Financials
     # Using SQLAlchemy's Numeric to ensure the DB stores exactly 2 decimal places
@@ -39,8 +42,23 @@ class PaystackTransaction(SQLModel, table=True):
     currency: str = Field(default="NGN", max_length=3)
 
     # State & Context
-    status: TransactionStatus = Field(default=TransactionStatus.PENDING)
-    transaction_type: TransactionType = Field(nullable=False)
+    # Explicit String columns — SQLModel would otherwise infer a native PG enum,
+    # which is not what the table actually has.
+    status: TransactionStatus = Field(
+        default=TransactionStatus.PENDING,
+        sa_column=Column("status", String(50), nullable=False),
+    )
+    transaction_type: TransactionType = Field(
+        sa_column=Column("transaction_type", String(50), nullable=False)
+    )
+
+    # Transfers (payouts / withdrawals)
+    transfer_code: Optional[str] = Field(
+        default=None, sa_column=Column("transfer_code", String(100), index=True)
+    )
+    recipient_code: Optional[str] = Field(default=None, max_length=100)
+    bank_account_id: Optional[str] = Field(default=None, foreign_key="bank_account.id")
+    failure_reason: Optional[str] = Field(default=None, max_length=255)
 
     # Audit & Metadata
     payment_channel: Optional[str] = Field(

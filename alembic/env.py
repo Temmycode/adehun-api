@@ -10,10 +10,15 @@ from app.models.agreement import Agreement  # noqa: F401
 from app.models.agreement_participant import AgreementParticipant  # noqa: F401
 from app.models.asset import Asset  # noqa: F401
 from app.models.asset_file import AssetFile  # noqa: F401
+from app.models.bank_account import BankAccount  # noqa: F401
 from app.models.condition import Condition  # noqa: F401
+from app.models.idempotency_key import IdempotencyKey  # noqa: F401
 from app.models.invitation import Invitation  # noqa: F401
 from app.models.notification import Notification  # noqa: F401
+from app.models.paystack_transaction import PaystackTransaction  # noqa: F401
 from app.models.transaction import Transaction  # noqa: F401
+from app.models.wallet import Wallet  # noqa: F401
+from app.models.webhook_event import WebhookEvent  # noqa: F401
 
 # Import all models so SQLAlchemy registers them in the metadata before
 # autogenerate inspects it. The order here matters — tables with no

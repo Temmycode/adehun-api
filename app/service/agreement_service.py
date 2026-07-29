@@ -1,16 +1,20 @@
-from app.logging import get_logger
+from dataclasses import dataclass
+from decimal import Decimal
 
 from fastapi import BackgroundTasks
 
-import app.service.email_service as email_service
-from app.common.enums import InvitationStatus
+from app.common.enums import InvitationStatus, ParticipantRole
 from app.config import settings
 from app.exceptions import (
     AgreementAcceptanceError,
     AgreementCreationError,
     AgreementNotFoundError,
+    BadRequestError,
+    ForbiddenError,
     InvitationNotFoundError,
+    ParticipantNotFoundError,
 )
+from app.logging import get_logger
 from app.models import Agreement, AgreementParticipant, Condition, Invitation
 from app.repository.agreement_repository import AgreementRepository
 from app.schemas.agreement_schema import (
@@ -22,6 +26,7 @@ from app.schemas.agreement_schema import (
 )
 from app.schemas.conditions_schema import ConditionResponse
 from app.schemas.participant_schema import ParticipantResponse
+from app.service import email_service
 
 from ..service.invitation_service import (
     get_invitation_token,
@@ -31,9 +36,121 @@ from ..service.invitation_service import (
 logger = get_logger(__name__)
 
 
+@dataclass(frozen=True)
+class EscrowContext:
+    """Everything a money operation needs about an agreement.
+
+    Produced by the `prepare_*` methods, which authorise and validate but never
+    touch a balance — the router hands this to `WalletService`, keeping the
+    services from calling each other.
+    """
+
+    agreement_id: str
+    title: str
+    amount: Decimal
+    depositor_user_id: str
+    beneficiary_user_id: str
+    depositor_participant_id: str
+    beneficiary_participant_id: str
+
+
 class AgreementService:
     def __init__(self, agreement_repo: AgreementRepository):
         self.agreement_repo = agreement_repo
+
+    # ------------------------------------------------------------------ #
+    #  Escrow preparation                                                #
+    # ------------------------------------------------------------------ #
+
+    def get_escrow_context(self, agreement_id: str) -> EscrowContext:
+        """Resolve both sides of an agreement, or explain what is missing."""
+        agreement = self.agreement_repo.get_by_id(agreement_id)
+        if agreement is None:
+            raise AgreementNotFoundError()
+
+        participants = self.agreement_repo.get_participants_for_agreement(agreement_id)
+        depositor = next(
+            (p for p in participants if p.role == ParticipantRole.DEPOSITOR), None
+        )
+        beneficiary = next(
+            (p for p in participants if p.role == ParticipantRole.BENEFICIARY), None
+        )
+        if depositor is None or beneficiary is None:
+            raise ParticipantNotFoundError(
+                "Agreement does not yet have both a depositor and a beneficiary"
+            )
+
+        return EscrowContext(
+            agreement_id=agreement.id,
+            title=agreement.title,
+            amount=agreement.amount,
+            depositor_user_id=depositor.user_id,
+            beneficiary_user_id=beneficiary.user_id,
+            depositor_participant_id=depositor.id,
+            beneficiary_participant_id=beneficiary.id,
+        )
+
+    def prepare_escrow_funding(self, agreement_id: str, user_id: str) -> EscrowContext:
+        """Authorise a depositor to move the agreement amount into escrow.
+
+        Note there is no agreement status change here. Funded-ness is derived
+        from the ledger (`is_funded`), so adding a `funded` status value — which
+        would silently change what StatsRepository counts as active — is
+        unnecessary.
+        """
+        context = self.get_escrow_context(agreement_id)
+
+        if context.depositor_user_id != user_id:
+            raise ForbiddenError("Only the depositor can fund this agreement")
+
+        agreement = self.agreement_repo.get_by_id(agreement_id)
+        if agreement is not None and agreement.status in {
+            "cancelled",
+            "completed",
+            "refunded",
+        }:
+            raise BadRequestError(
+                f"An agreement that is {agreement.status} cannot be funded"
+            )
+
+        return context
+
+    def prepare_release(self, agreement_id: str) -> EscrowContext:
+        """Resolve both sides for a release, and mark the agreement completed.
+
+        The status change is FLUSHED, not committed, so that the following
+        `apply_transfer` commits it in the same DB transaction as the money.
+        If the transfer fails, the rollback inside the wallet repository
+        discards this too.
+        """
+        context = self.get_escrow_context(agreement_id)
+
+        agreement = self.agreement_repo.get_by_id(agreement_id)
+        if agreement is None:
+            raise AgreementNotFoundError()
+
+        agreement.status = "completed"
+        self.agreement_repo.save_agreement(agreement, commit=False)
+        return context
+
+    def mark_agreement_completed_cache(self, agreement_id: str) -> None:
+        """Drop the cached agreement after a release.
+
+        Easy to forget, and without it `get_by_id` serves a stale status from
+        Redis for five minutes.
+        """
+        try:
+            context = self.get_escrow_context(agreement_id)
+            self.agreement_repo.invalidate_agreement_cache(
+                agreement_id,
+                [context.depositor_user_id, context.beneficiary_user_id],
+            )
+        except Exception:
+            logger.warning(
+                "failed to invalidate agreement cache after release",
+                extra={"agreement_id": agreement_id},
+                exc_info=True,
+            )
 
     def _invite_participant(
         self,

@@ -4,23 +4,24 @@
 import json
 from contextlib import asynccontextmanager
 
-from app.routers import wallet
 import cloudinary
-from fastapi.exceptions import RequestValidationError
 import firebase_admin
-from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from firebase_admin import credentials
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import settings
 from app.core.response import error_response
 from app.exceptions import AppError
 from app.logging import get_logger, silence_third_party_loggers
 from app.rate_limiting import limiter
+from app.routers import bank_account, transaction, wallet
+from app.service.paystack_client import paystack_client
 
 from .routers import agreement, asset, auth, condition, dev, notification, stats, user
 
@@ -38,6 +39,7 @@ silence_third_party_loggers()
 async def lifespan(app: FastAPI):
     logger.info("Starting application...")
     yield
+    await paystack_client.aclose()
     logger.info("Application shutdown...")
 
 
@@ -145,6 +147,8 @@ app.include_router(condition.router)
 app.include_router(asset.router)
 app.include_router(stats.router)
 app.include_router(notification.router)
+app.include_router(transaction.router)
+app.include_router(bank_account.router)
 
 if settings.debug:
     app.include_router(dev.router)

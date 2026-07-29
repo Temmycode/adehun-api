@@ -44,6 +44,9 @@ class AgreementResponse(BaseModel):
     condition_count: int | None = 0
     conditions_met_count: int | None = 0
     current_user_accepted: bool = False
+    # Derived from the ledger (an `escrow_lock` entry exists), not from a
+    # status value — see AgreementService.prepare_escrow_funding.
+    is_funded: bool = False
 
     model_config = {"from_attributes": True}
 

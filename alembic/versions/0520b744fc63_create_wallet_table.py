@@ -25,7 +25,6 @@ def upgrade() -> None:
         "wallet",
         sa.Column("id", sa.String(), nullable=False),
         sa.Column("user_id", sa.String(), nullable=False),
-        # Fixed: Match 'escrow_balance' from your webhook code, and add financial precision
         sa.Column(
             "escrow_balance",
             sa.Numeric(precision=12, scale=2),
@@ -34,7 +33,6 @@ def upgrade() -> None:
         ),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        # Ensure table name matches your actual users table (e.g., 'users' vs 'user')
         sa.ForeignKeyConstraint(["user_id"], ["user.id"]),
         sa.PrimaryKeyConstraint("id"),
     )

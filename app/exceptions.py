@@ -18,6 +18,11 @@ class ForbiddenError(AppError):
         super().__init__(message=message, code="FORBIDDEN", status_code=403)
 
 
+class WithdrawalNotAllowedError(AppError):
+    def __init__(self, message: str = "Withdrawals are currently unavailable"):
+        super().__init__(message=message, code="FORBIDDEN", status_code=403)
+
+
 # 404s
 class UserNotFoundError(AppError):
     def __init__(self, message: str = "User not found"):
@@ -49,6 +54,16 @@ class NotificationNotFoundError(AppError):
         super().__init__(message=message, code="NOT_FOUND", status_code=404)
 
 
+class TransactionNotFoundError(AppError):
+    def __init__(self, message: str = "Transaction not found"):
+        super().__init__(message=message, code="NOT_FOUND", status_code=404)
+
+
+class BankAccountNotFoundError(AppError):
+    def __init__(self, message: str = "Bank account not found"):
+        super().__init__(message=message, code="NOT_FOUND", status_code=404)
+
+
 # 409s
 class UserAlreadyExistsError(AppError):
     def __init__(self, message: str = "User already exists"):
@@ -58,6 +73,43 @@ class UserAlreadyExistsError(AppError):
 class AgreementAlreadyExistsError(AppError):
     def __init__(self, message: str = "Agreement already exists"):
         super().__init__(message=message, code="CONFLICT", status_code=409)
+
+
+class InsufficientFundsError(AppError):
+    def __init__(self, message: str = "Insufficient available balance"):
+        super().__init__(message=message, code="INSUFFICIENT_FUNDS", status_code=409)
+
+
+class InsufficientEscrowBalanceError(AppError):
+    def __init__(self, message: str = "Insufficient escrow balance"):
+        super().__init__(
+            message=message, code="INSUFFICIENT_ESCROW_BALANCE", status_code=409
+        )
+
+
+class DuplicateBankAccountError(AppError):
+    def __init__(self, message: str = "This bank account is already saved"):
+        super().__init__(message=message, code="CONFLICT", status_code=409)
+
+
+class IdempotencyConflictError(AppError):
+    def __init__(
+        self,
+        message: str = "A request with this Idempotency-Key is still in progress",
+    ):
+        super().__init__(
+            message=message, code="IDEMPOTENT_REQUEST_IN_PROGRESS", status_code=409
+        )
+
+
+class IdempotencyKeyReusedError(AppError):
+    def __init__(
+        self,
+        message: str = "This Idempotency-Key was already used with a different request body",
+    ):
+        super().__init__(
+            message=message, code="IDEMPOTENCY_KEY_REUSED", status_code=409
+        )
 
 
 # 500s
