@@ -29,6 +29,7 @@ from app.schemas.agreement_schema import (
     AgreementCreateResponse,
     AgreementInvitationResponse,
     AgreementResponse,
+    InvitationResponse,
 )
 from app.schemas.escrow_schema import EscrowMovementResponse
 
@@ -57,6 +58,25 @@ async def get_all_user_agreements(
     """
     return success_response(
         data=agreement_service.get_all_user_agreements(current_user.id)
+    )
+
+
+@router.get(
+    "/invited",
+    response_model=APIResponse[list[InvitationResponse]],
+    responses={401: {"model": UnauthorizedResponse}},
+)
+@limiter.limit("10/minute")
+async def get_invited_agreements(
+    request: Request,
+    current_user: ActiveUserDep,
+    agreement_service: AgreementServiceDep,
+):
+    """
+    Get all agreements the authenticated user has been invited to.
+    """
+    return success_response(
+        data=agreement_service.get_user_invited_agreements(current_user.email)
     )
 
 

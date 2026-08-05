@@ -179,7 +179,7 @@ class AgreementService:
                 invitation_token,
                 invitation_data.model_dump(mode="json"),
             )
-        invitation_link = f"{settings.frontend_url}/invite?token={invitation_token}"
+        invitation_link = f"{settings.web_url}/invite?token={invitation_token}"
         background_tasks.add_task(
             email_service.send_invitation_email,
             email,
@@ -310,6 +310,11 @@ class AgreementService:
             raise InvitationNotFoundError("Invitation not found for this agreement")
 
         return AgreementInvitationResponse.model_validate(invitation)
+
+    def get_user_invited_agreements(self, email: str) -> list[InvitationResponse]:
+        """Return notifications for all agreements where the user has an invitation."""
+        invitations = self.agreement_repo.get_invitations_for_email(email)
+        return [InvitationResponse.model_validate(inv) for inv in invitations]
 
     def _to_agreement_response(
         self,

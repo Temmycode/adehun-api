@@ -218,6 +218,13 @@ class AgreementRepository(RedisClient):
             )
         ).first()
 
+    def get_invitations_for_email(self, email: str) -> list[Invitation]:
+        """Return invitations that were sent to the specified email."""
+        invitations = self.session.exec(
+            select(Invitation).where(Invitation.email == email)
+        ).all()
+        return list(invitations)
+
     # ------------------------------------------------------------------ #
     #  Write operations (always invalidate relevant cache keys)          #
     # ------------------------------------------------------------------ #

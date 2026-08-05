@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     redis_database_password: str
     redis_database_port: str
     resend_api_key: str | None = None
-    frontend_url: str
+    web_url: str
     debug: bool = True
     paystack_test_public_key: str
     paystack_test_secret_key: str

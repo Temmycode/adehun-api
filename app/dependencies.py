@@ -25,10 +25,10 @@ from app.service.condition_service import ConditionService
 from app.service.notification_service import NotificationService
 from app.service.paystack_webhook_service import PaystackWebhookService
 from app.service.stats_service import StatsService
+from app.service.token_service import get_active_user, get_current_user
 from app.service.transaction_service import TransactionService
 from app.service.user_service import UserService
 from app.service.wallet_service import WalletService
-from app.service.token_service import get_active_user, get_current_user
 
 
 def get_user_repository(session: SessionDep, redis: RedisDep) -> UserRepository:
@@ -51,13 +51,6 @@ CurrentUserDep = Annotated[User, Depends(get_current_user)]
 ActiveUserDep = Annotated[User, Depends(get_active_user)]
 
 
-def get_auth_service(user_repo: UserRepositoryDep):
-    return AuthService(user_repo)
-
-
-AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
-
-
 def get_agreement_repository(
     session: SessionDep, redis_client: RedisDep
 ) -> AgreementRepository:
@@ -67,6 +60,38 @@ def get_agreement_repository(
 AgreementRepositoryDep = Annotated[
     AgreementRepository, Depends(get_agreement_repository)
 ]
+
+
+def get_notification_repository(
+    session: SessionDep, redis_client: RedisDep
+) -> NotificationRepository:
+    return NotificationRepository(session, redis_client)
+
+
+NotificationRepositoryDep = Annotated[
+    NotificationRepository, Depends(get_notification_repository)
+]
+
+
+def get_notification_service(
+    notification_repo: NotificationRepositoryDep,
+) -> NotificationService:
+    return NotificationService(notification_repo)
+
+
+NotificationServiceDep = Annotated[
+    NotificationService, Depends(get_notification_service)
+]
+
+
+def get_auth_service(
+    user_repo: UserRepositoryDep,
+    notification_service: NotificationServiceDep,
+) -> AuthService:
+    return AuthService(user_repo, notification_service)
+
+
+AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 
 
 def get_condition_repository(
@@ -122,28 +147,6 @@ def get_stats_service(stats_repo: StatsRepositoryDep) -> StatsService:
 StatsServiceDep = Annotated[StatsService, Depends(get_stats_service)]
 
 
-def get_notification_repository(
-    session: SessionDep, redis_client: RedisDep
-) -> NotificationRepository:
-    return NotificationRepository(session, redis_client)
-
-
-NotificationRepositoryDep = Annotated[
-    NotificationRepository, Depends(get_notification_repository)
-]
-
-
-def get_notification_service(
-    notification_repo: NotificationRepositoryDep,
-) -> NotificationService:
-    return NotificationService(notification_repo)
-
-
-NotificationServiceDep = Annotated[
-    NotificationService, Depends(get_notification_service)
-]
-
-
 def get_wallet_repository(session: SessionDep, client: RedisDep) -> WalletRepository:
     return WalletRepository(session, client)
 
@@ -166,9 +169,7 @@ def get_bank_account_service(repo: BankAccountRepositoryDep) -> BankAccountServi
     return BankAccountService(repo)
 
 
-BankAccountServiceDep = Annotated[
-    BankAccountService, Depends(get_bank_account_service)
-]
+BankAccountServiceDep = Annotated[BankAccountService, Depends(get_bank_account_service)]
 
 
 def get_wallet_service(
@@ -195,9 +196,7 @@ def get_transaction_service(repo: TransactionRepositoryDep) -> TransactionServic
     return TransactionService(repo)
 
 
-TransactionServiceDep = Annotated[
-    TransactionService, Depends(get_transaction_service)
-]
+TransactionServiceDep = Annotated[TransactionService, Depends(get_transaction_service)]
 
 
 def get_webhook_event_repository(

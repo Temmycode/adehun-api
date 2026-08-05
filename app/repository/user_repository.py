@@ -1,8 +1,7 @@
-from app.logging import get_logger
-
 from redis import Redis
 from sqlmodel import Session, select
 
+from app.logging import get_logger
 from app.models import Condition, Invitation, User
 from app.redis import RedisClient
 from app.schemas.user_schema import UpdateUserRequest

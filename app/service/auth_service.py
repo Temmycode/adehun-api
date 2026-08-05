@@ -2,7 +2,9 @@ from app.logging import get_logger
 
 from firebase_admin import auth
 
+from app.common.enums import NotificationType
 from app.service import token_service
+from app.service.notification_service import NotificationService
 from app.exceptions import InvitationNotFoundError, UserNotFoundError
 from app.models import User
 from app.repository.user_repository import UserRepository
@@ -17,8 +19,13 @@ logger = get_logger(__name__)
 class AuthService:
     """Service for handling authentication and authorization."""
 
-    def __init__(self, user_repo: UserRepository):
+    def __init__(
+        self,
+        user_repo: UserRepository,
+        notification_service: NotificationService | None = None,
+    ):
         self.user_repo = user_repo
+        self.notification_service = notification_service
 
     def _create_user(self, user_id: str):
         """Create a new user in the database."""
@@ -75,6 +82,7 @@ class AuthService:
         if not user:
             # create a new user
             user = self._create_user(user_id)
+            self._notify_pending_invitations(user)
         else:
             is_signed_up = True
 
@@ -91,6 +99,31 @@ class AuthService:
         )
 
         return response
+
+    def _notify_pending_invitations(self, user: User) -> None:
+        """Create notification entries for any pending invitations tied to this user's email."""
+        if not self.notification_service:
+            return
+
+        invitations = self.user_repo.get_invitations_by_email(user.email)
+        for invitation in invitations:
+            try:
+                self.notification_service.create_notification(
+                    user_id=user.id,
+                    type=NotificationType.INVITATION_RECEIVED,
+                    title="New Escrow Invitation",
+                    message=f"You have been invited to an escrow agreement by {invitation.invited_by_user.name if invitation.invited_by_user else 'a sender'}",
+                    metadata={"agreement_id": invitation.agreement_id},
+                )
+            except Exception:
+                logger.exception(
+                    "failed to create pending invitation notification",
+                    extra={
+                        "user_id": user.id,
+                        "invitation_id": invitation.id,
+                        "agreement_id": invitation.agreement_id,
+                    },
+                )
 
     def refresh_token(self, refresh_token: str) -> LoginResponse:
         """Refresh the access token using the refresh token."""

@@ -61,10 +61,7 @@ if not firebase_admin._apps:
         firebase_admin.initialize_app(credentials)
         logger.info("Firebase Admin initialized")
     except Exception:
-        logger.error(
-            "Firebase Admin init failed — push notifications disabled",
-            exc_info=True,
-        )
+        logger.exception("Firebase Admin init failed — push notifications disabled")
 
 app = FastAPI(title="Adehun API", version="1.0.0", lifespan=lifespan)
 app.state.limiter = limiter
@@ -118,9 +115,8 @@ async def value_error_exception_handler(request: Request, exc: AppError):
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    logger.error(
+    logger.exception(
         "Unhandled exception",
-        exc_info=True,
         extra={"meta": {"path": request.url.path, "error": str(exc)}},
     )
     return error_response(
