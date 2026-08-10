@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, Request
+from fastapi import APIRouter, BackgroundTasks, Request, WebSocket, status
 
 from app.common.enums import NotificationType
 from app.core.response import (
@@ -24,6 +24,7 @@ from app.dependencies import (
 from app.exceptions import BadRequestError
 from app.logging import get_logger
 from app.rate_limiting import limiter
+from app.realtime.manager import ws_manager
 from app.schemas.agreement_schema import (
     AgreementCreate,
     AgreementCreateResponse,
@@ -32,6 +33,7 @@ from app.schemas.agreement_schema import (
     InvitationResponse,
 )
 from app.schemas.escrow_schema import EscrowMovementResponse
+from app.service.token_service import get_user_id_from_ws
 
 logger = get_logger(__name__)
 
@@ -78,6 +80,84 @@ async def get_invited_agreements(
     return success_response(
         data=agreement_service.get_user_invited_agreements(current_user.email)
     )
+
+
+async def _send_agreement_ws_payload(user_id: str, agreement, event: str = "updated"):
+    try:
+        await ws_manager.send_to_user(
+            user_id,
+            {
+                "type": "agreement",
+                "event": event,
+                "agreement_id": agreement.id,
+                "agreement": agreement.model_dump(mode="json"),
+            },
+        )
+    except Exception:
+        logger.exception(
+            "failed to push agreement websocket event",
+            extra={"user_id": user_id, "agreement_id": agreement.id, "event": event},
+        )
+
+
+@router.websocket("/ws")
+async def agreement_websocket(
+    websocket: WebSocket,
+    agreement_service: AgreementServiceDep,
+):
+    user_id = get_user_id_from_ws(websocket)
+    if not user_id:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    await ws_manager.connect(user_id, websocket)
+    await websocket.send_json(
+        {"type": "connected", "message": "Agreement websocket connected"}
+    )
+
+    try:
+        while True:
+            payload = await websocket.receive_json()
+            if payload.get("type") == "get_agreement":
+                agreement_id = payload.get("agreement_id")
+                if not agreement_id:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "message": "agreement_id is required",
+                        }
+                    )
+                    continue
+                try:
+                    agreement = agreement_service.get_agreement(agreement_id)
+                    await websocket.send_json(
+                        {
+                            "type": "agreement",
+                            "agreement_id": agreement.id,
+                            "agreement": agreement.model_dump(mode="json"),
+                        }
+                    )
+                except Exception:
+                    logger.exception(
+                        "failed to fetch agreement for websocket request",
+                        extra={"user_id": user_id, "agreement_id": agreement_id},
+                    )
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "message": "Unable to fetch agreement",
+                            "agreement_id": agreement_id,
+                        }
+                    )
+            else:
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "message": "Unsupported websocket event type",
+                    }
+                )
+    finally:
+        ws_manager.disconnect(user_id, websocket)
 
 
 @router.post(
@@ -133,6 +213,9 @@ async def create_agreement(
                 extra={"agreement_id": agreement.id, "invited_user_id": invited.id},
             )
 
+        await _send_agreement_ws_payload(invited.id, agreement, event="created")
+
+    await _send_agreement_ws_payload(current_user.id, agreement, event="created")
     return success_response(data=agreement, status_code=201)
 
 
@@ -161,12 +244,14 @@ async def accept_agreement(
     )
 
     # Notify only the other party once the agreement is accepted.
+    participant_ids = []
     if agreement.depositor and agreement.beneficiary:
-        recipient_ids = [
+        participant_ids = [
             p.user.id
             for p in (agreement.depositor, agreement.beneficiary)
-            if p.user.id != current_user.id
+            if p is not None and p.user is not None
         ]
+        recipient_ids = [uid for uid in participant_ids if uid != current_user.id]
         for uid in recipient_ids:
             try:
                 notification_service.create_notification(
@@ -183,11 +268,6 @@ async def accept_agreement(
                 )
 
     if agreement.status == "active":
-        participant_ids = [
-            p.user.id
-            for p in (agreement.depositor, agreement.beneficiary)
-            if p is not None and p.user is not None
-        ]
         for uid in participant_ids:
             try:
                 notification_service.create_notification(
@@ -202,6 +282,9 @@ async def accept_agreement(
                     "failed to create agreement-completed notification",
                     extra={"agreement_id": agreement.id, "recipient_id": uid},
                 )
+
+    for uid in set(participant_ids + [current_user.id]):
+        await _send_agreement_ws_payload(uid, agreement, event="updated")
 
     return success_response(data=agreement)
 
@@ -228,12 +311,14 @@ async def reject_agreement(
         agreement_id, current_user.id, current_user.email
     )
 
+    participant_ids = []
     if agreement.depositor and agreement.beneficiary:
-        recipient_ids = [
+        participant_ids = [
             p.user.id
             for p in (agreement.depositor, agreement.beneficiary)
-            if p.user.id != current_user.id
+            if p is not None and p.user is not None
         ]
+        recipient_ids = [uid for uid in participant_ids if uid != current_user.id]
         for uid in recipient_ids:
             try:
                 notification_service.create_notification(
@@ -248,6 +333,9 @@ async def reject_agreement(
                     "failed to create agreement-declined notification",
                     extra={"agreement_id": agreement.id, "recipient_id": uid},
                 )
+
+    for uid in set(participant_ids + [current_user.id]):
+        await _send_agreement_ws_payload(uid, agreement, event="updated")
 
     return success_response(data=agreement)
 
@@ -372,6 +460,10 @@ async def fund_agreement(
             "failed to create escrow funding notification",
             extra={"agreement_id": agreement_id},
         )
+
+    agreement_payload = agreement_service.get_agreement(agreement_id)
+    await _send_agreement_ws_payload(current_user.id, agreement_payload)
+    await _send_agreement_ws_payload(context.beneficiary_user_id, agreement_payload)
 
     idem.bind_reference(result.entry.reference)
     return idem.complete(
