@@ -195,8 +195,10 @@ async def create_agreement(
     invited = user_repository.get_by_email(
         agreement_data.other_participant_email_or_phone
     )
+    # The invitation was created for the other participant's email, so lookup
+    # the invitation using that email (not the creator's email).
     invitation = agreement_service.agreement_repo.get_invitation_by_agreement_id(
-        current_user.email, agreement.id
+        agreement_data.other_participant_email_or_phone, agreement.id
     )
     if invited and invited.id != current_user.id:
         try:
@@ -205,11 +207,13 @@ async def create_agreement(
                 type=NotificationType.INVITATION_RECEIVED,
                 title="New Escrow Invitation",
                 message=f"{current_user.name} invited you to an escrow agreement",
-                metadata=InvitationResponse.model_validate(invitation).model_dump(
-                    mode="json"
-                )
-                if invitation
-                else {},
+                metadata=(
+                    InvitationResponse.model_validate(invitation).model_dump(
+                        mode="json"
+                    )
+                    if invitation
+                    else {}
+                ),
             )
         except Exception:
             logger.exception(
