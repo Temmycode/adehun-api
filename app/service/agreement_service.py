@@ -255,6 +255,23 @@ class AgreementService:
             for c in conditions:
                 self.agreement_repo.session.refresh(c)
 
+            # Ensure the creator participant was persisted. In some rare
+            # failure modes the in-memory participant may not have been
+            # committed; double-check and insert if missing.
+            existing_participant = self.agreement_repo.get_participant_for_user(
+                agreement.id, current_user_id
+            )
+            if existing_participant is None:
+                creator_check = AgreementParticipant(
+                    user_id=current_user_id,
+                    agreement_id=agreement.id,
+                    role=agreement_data.role,
+                    status=InvitationStatus.ACCEPTED.value,
+                )
+                self.agreement_repo.session.add(creator_check)
+                self.agreement_repo.session.commit()
+                self.agreement_repo.session.refresh(creator_check)
+
             db_agreement = self.agreement_repo.get_by_id(agreement.id)
             if db_agreement is None:
                 raise AgreementNotFoundError()
