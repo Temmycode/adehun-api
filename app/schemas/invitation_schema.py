@@ -11,3 +11,4 @@ class ConditionInvitationResponse(BaseModel):
     expires_at: datetime
 
     model_config = {"from_attributes": True}
+
