@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
@@ -14,6 +15,13 @@ if TYPE_CHECKING:
 
 class AgreementParticipant(SQLModel, table=True):
     __tablename__ = "agreement_participant"  # pyright: ignore[reportAssignmentType]
+    __table_args__ = (
+        UniqueConstraint(
+            "agreement_id",
+            "user_id",
+            name="ux_agreement_participant_agreement_user",
+        ),
+    )
 
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     agreement_id: str = Field(foreign_key="agreement.id")

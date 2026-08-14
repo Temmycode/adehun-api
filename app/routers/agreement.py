@@ -242,10 +242,14 @@ async def accept_agreement(
     agreement_service: AgreementServiceDep,
     notification_service: NotificationServiceDep,
     agreement_id: str,
+    idem: IdempotencyDep,
 ):
     """
     Accept an agreement.
     """
+    replay = idem.begin("POST /agreements/{id}/accept", {"agreement_id": agreement_id})
+    if replay is not None:
+        return replay
 
     agreement = agreement_service.accept_agreement(
         agreement_id, current_user.id, current_user.email
@@ -294,7 +298,7 @@ async def accept_agreement(
     for uid in set(participant_ids + [current_user.id]):
         await _send_agreement_ws_payload(uid, agreement, event="updated")
 
-    return success_response(data=agreement)
+    return idem.complete(success_response(data=agreement))
 
 
 @router.post(
@@ -312,8 +316,12 @@ async def reject_agreement(
     agreement_service: AgreementServiceDep,
     notification_service: NotificationServiceDep,
     agreement_id: str,
+    idem: IdempotencyDep,
 ):
     """Reject an agreement."""
+    replay = idem.begin("POST /agreements/{id}/reject", {"agreement_id": agreement_id})
+    if replay is not None:
+        return replay
 
     agreement = agreement_service.reject_agreement(
         agreement_id, current_user.id, current_user.email
@@ -345,7 +353,7 @@ async def reject_agreement(
     for uid in set(participant_ids + [current_user.id]):
         await _send_agreement_ws_payload(uid, agreement, event="updated")
 
-    return success_response(data=agreement)
+    return idem.complete(success_response(data=agreement))
 
 
 @router.get(

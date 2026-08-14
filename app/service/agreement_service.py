@@ -390,6 +390,12 @@ class AgreementService:
         participant = self.agreement_repo.get_participant_for_user(
             agreement_id, user_id
         )
+        if (
+            participant is not None
+            and participant.status == InvitationStatus.ACCEPTED.value
+        ):
+            return self.get_agreement(agreement_id, user_id)
+
         if participant is None:
             participant = AgreementParticipant(
                 agreement_id=agreement_id,
@@ -401,6 +407,9 @@ class AgreementService:
         else:
             participant.status = InvitationStatus.ACCEPTED.value
             self.agreement_repo.session.add(participant)
+
+        invitation.status = "accepted"
+        self.agreement_repo.session.add(invitation)
 
         self.agreement_repo.session.commit()
         self.agreement_repo.session.refresh(participant)
@@ -450,6 +459,12 @@ class AgreementService:
         participant = self.agreement_repo.get_participant_for_user(
             agreement_id, user_id
         )
+        if (
+            participant is not None
+            and participant.status == InvitationStatus.REJECTED.value
+        ):
+            return self.get_agreement(agreement_id, user_id)
+
         if participant is None:
             participant = AgreementParticipant(
                 agreement_id=agreement_id,
@@ -461,6 +476,9 @@ class AgreementService:
         else:
             participant.status = InvitationStatus.REJECTED.value
             self.agreement_repo.session.add(participant)
+
+        invitation.status = "expired"
+        self.agreement_repo.session.add(invitation)
 
         self.agreement_repo.session.commit()
         self.agreement_repo.session.refresh(participant)
