@@ -20,6 +20,11 @@ class User(SQLModel, table=True):
     name: str
     profile_picture_url: str | None = None
     active: int = Field(default=1, nullable=False)
+    # Platform staff. Grants access to the /admin/* routes via AdminUserDep —
+    # today that means reviewing and resolving disputes. No production endpoint
+    # sets this; it is granted by direct SQL (see the dev-only helper in
+    # app/routers/dev.py for local use).
+    is_admin: bool = Field(default=False, nullable=False)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     participations: list["AgreementParticipant"] = Relationship(

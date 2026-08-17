@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request
 
-from app.common.enums import NotificationType
+from app.common.enums import AgreementStatus, NotificationType
 from app.core.response import (
     APIResponse,
     ForbiddenResponse,
@@ -110,6 +110,17 @@ def _release_escrow_if_ready(
         if transaction_service.is_agreement_released(agreement_id):
             return
         if not condition_service.all_conditions_approved(agreement_id, user_id):
+            return
+        # An open dispute freezes the release. `prepare_release` enforces this
+        # authoritatively; checking here too keeps an expected, deliberate skip
+        # from being logged as an exception on every condition approval.
+        if agreement_service.get_agreement(agreement_id).status == (
+            AgreementStatus.DISPUTED
+        ):
+            logger.info(
+                "skipping automatic escrow release: agreement under dispute",
+                extra={"agreement_id": agreement_id},
+            )
             return
 
         perform_escrow_release(

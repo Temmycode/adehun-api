@@ -4,6 +4,7 @@ from .asset import Asset
 from .asset_file import AssetFile
 from .bank_account import BankAccount
 from .condition import Condition
+from .dispute import Dispute
 from .idempotency_key import IdempotencyKey
 from .invitation import Invitation
 from .notification import Notification
@@ -20,6 +21,7 @@ __all__ = [
     "AssetFile",
     "BankAccount",
     "Condition",
+    "Dispute",
     "IdempotencyKey",
     "Invitation",
     "Notification",

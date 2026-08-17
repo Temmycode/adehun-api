@@ -36,6 +36,20 @@ def _user_agreements_key(user_id: str) -> str:
     return f"user:{user_id}:agreements"
 
 
+def agreement_cache_keys(agreement_id: str, user_ids: list[str]) -> list[str]:
+    """Every Redis key that goes stale when an agreement's state changes.
+
+    Public because other repositories mutate `Agreement.status` too — the
+    dispute feature freezes and unfreezes agreements — and they must not
+    reimplement the key format. Getting this wrong means `get_by_id` serves a
+    stale status for five minutes, which for the dispute freeze would mean
+    escrow could still be released on a disputed agreement.
+    """
+    keys = [_agreement_key(agreement_id)]
+    keys.extend(_user_agreements_key(user_id) for user_id in user_ids if user_id)
+    return keys
+
+
 # ---------------------------------------------------------------------------
 # Repository
 # ---------------------------------------------------------------------------
@@ -313,9 +327,7 @@ class AgreementRepository(RedisClient):
         self, agreement_id: str, user_ids: list[str]
     ) -> None:
         """Invalidate agreement and user-agreement cache entries after state changes."""
-        keys = [_agreement_key(agreement_id)]
-        keys.extend(_user_agreements_key(user_id) for user_id in user_ids if user_id)
-        self._cache_delete(*keys)
+        self._cache_delete(*agreement_cache_keys(agreement_id, user_ids))
 
     def refresh(self, agreement: Agreement) -> None:
         """Refresh a student instance from DB and re-cache it."""

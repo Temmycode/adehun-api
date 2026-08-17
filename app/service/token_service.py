@@ -6,6 +6,7 @@ from fastapi import Depends, HTTPException, WebSocket
 from fastapi.security import OAuth2PasswordBearer
 
 from app.database import SessionDep
+from app.exceptions import AdminAccessRequiredError
 from app.models import User
 
 from app.config import settings
@@ -124,6 +125,24 @@ def get_active_user(
         )
 
     return user
+
+
+def get_admin_user(current_user: Annotated[User, Depends(get_active_user)]) -> User:
+    """Platform staff only — the gate on every /admin route.
+
+    Layered on `get_active_user`, so an admin still has to be an authenticated,
+    active user. Raises AppError rather than HTTPException so the response
+    envelope matches the rest of the API; the HTTPExceptions above predate that
+    convention.
+    """
+    if not current_user.is_admin:
+        logger.warning(
+            "non-admin attempted an admin route",
+            extra={"user_id": current_user.id, "email": current_user.email},
+        )
+        raise AdminAccessRequiredError()
+
+    return current_user
 
 
 # -------------------------------------------------------------------

@@ -23,7 +23,18 @@ from app.rate_limiting import limiter
 from app.routers import bank_account, transaction, wallet
 from app.service.paystack_client import paystack_client
 
-from .routers import agreement, asset, auth, condition, dev, notification, stats, user
+from .routers import (
+    admin_dispute,
+    agreement,
+    asset,
+    auth,
+    condition,
+    dev,
+    dispute,
+    notification,
+    stats,
+    user,
+)
 
 if settings.debug:
     from .routers import dev
@@ -145,6 +156,8 @@ app.include_router(stats.router)
 app.include_router(notification.router)
 app.include_router(transaction.router)
 app.include_router(bank_account.router)
+app.include_router(dispute.router)
+app.include_router(admin_dispute.router)
 
 if settings.debug:
     app.include_router(dev.router)

@@ -10,6 +10,7 @@ from app.repository.agreement_repository import AgreementRepository
 from app.repository.asset_repository import AssetRepository
 from app.repository.bank_account_repository import BankAccountRepository
 from app.repository.condition_repository import ConditionRepository
+from app.repository.dispute_repository import DisputeRepository
 from app.repository.idempotency_repository import IdempotencyRepository
 from app.repository.notification_repository import NotificationRepository
 from app.repository.stats_repository import StatsRepository
@@ -22,10 +23,11 @@ from app.service.asset_service import AssetService
 from app.service.auth_service import AuthService
 from app.service.bank_account_service import BankAccountService
 from app.service.condition_service import ConditionService
+from app.service.dispute_service import DisputeService
 from app.service.notification_service import NotificationService
 from app.service.paystack_webhook_service import PaystackWebhookService
 from app.service.stats_service import StatsService
-from app.service.token_service import get_active_user, get_current_user
+from app.service.token_service import get_active_user, get_admin_user, get_current_user
 from app.service.transaction_service import TransactionService
 from app.service.user_service import UserService
 from app.service.wallet_service import WalletService
@@ -49,6 +51,10 @@ CurrentUserDep = Annotated[User, Depends(get_current_user)]
 
 
 ActiveUserDep = Annotated[User, Depends(get_active_user)]
+
+
+# Platform staff. The only gate on the /admin/* routes.
+AdminUserDep = Annotated[User, Depends(get_admin_user)]
 
 
 def get_agreement_repository(
@@ -246,3 +252,19 @@ def get_idempotency_context(
 
 
 IdempotencyDep = Annotated[IdempotencyContext, Depends(get_idempotency_context)]
+
+
+def get_dispute_repository(
+    session: SessionDep, redis_client: RedisDep
+) -> DisputeRepository:
+    return DisputeRepository(session, redis_client)
+
+
+DisputeRepositoryDep = Annotated[DisputeRepository, Depends(get_dispute_repository)]
+
+
+def get_dispute_service(dispute_repo: DisputeRepositoryDep) -> DisputeService:
+    return DisputeService(dispute_repo)
+
+
+DisputeServiceDep = Annotated[DisputeService, Depends(get_dispute_service)]

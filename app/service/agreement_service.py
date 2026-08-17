@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from fastapi import BackgroundTasks
 
-from app.common.enums import InvitationStatus, ParticipantRole
+from app.common.enums import AgreementStatus, InvitationStatus, ParticipantRole
 from app.config import settings
 from app.exceptions import (
     AgreementAcceptanceError,
@@ -105,9 +105,12 @@ class AgreementService:
 
         agreement = self.agreement_repo.get_by_id(agreement_id)
         if agreement is not None and agreement.status in {
-            "cancelled",
-            "completed",
-            "refunded",
+            AgreementStatus.CANCELLED,
+            AgreementStatus.COMPLETED,
+            AgreementStatus.REFUNDED,
+            # An open dispute freezes the agreement in both directions: no new
+            # money in, and (see prepare_release) none out.
+            AgreementStatus.DISPUTED,
         }:
             raise BadRequestError(
                 f"An agreement that is {agreement.status} cannot be funded"
@@ -129,7 +132,18 @@ class AgreementService:
         if agreement is None:
             raise AgreementNotFoundError()
 
-        agreement.status = "completed"
+        # An open dispute freezes the money. This single check protects BOTH
+        # release paths — POST /agreements/{id}/release and the automatic
+        # release fired on final condition approval — because both funnel
+        # through perform_escrow_release -> prepare_release. Guarding the
+        # funnel rather than the two call sites means a future third caller
+        # cannot bypass it.
+        if agreement.status == AgreementStatus.DISPUTED:
+            raise BadRequestError(
+                "This agreement is under dispute and cannot be released"
+            )
+
+        agreement.status = AgreementStatus.COMPLETED
         self.agreement_repo.save_agreement(agreement, commit=False)
         return context
 
@@ -423,12 +437,12 @@ class AgreementService:
             1 for p in participants if p.status == InvitationStatus.ACCEPTED.value
         )
         if accepted_count >= 2:
-            agreement.status = "active"
+            agreement.status = AgreementStatus.ACTIVE
             self.agreement_repo.session.add(agreement)
             self.agreement_repo.session.commit()
             self.agreement_repo.session.refresh(agreement)
         else:
-            agreement.status = "pending"
+            agreement.status = AgreementStatus.PENDING
             self.agreement_repo.session.add(agreement)
             self.agreement_repo.session.commit()
             self.agreement_repo.session.refresh(agreement)
@@ -449,6 +463,15 @@ class AgreementService:
         self, agreement_id: str, user_id: str, email: str
     ) -> AgreementResponse:
         """Reject an agreement and mark the participant as rejected."""
+
+        # This method cancels the agreement unconditionally further down, which
+        # would otherwise let a party under dispute cancel their way out of the
+        # freeze. Checked before any state is written.
+        existing = self.agreement_repo.get_by_id(agreement_id)
+        if existing is not None and existing.status == AgreementStatus.DISPUTED:
+            raise BadRequestError(
+                "This agreement is under dispute and cannot be cancelled"
+            )
 
         invitation = self.agreement_repo.get_invitation_by_agreement_id(
             email, agreement_id
@@ -487,7 +510,7 @@ class AgreementService:
         if agreement is None:
             raise AgreementNotFoundError()
 
-        agreement.status = "cancelled"
+        agreement.status = AgreementStatus.CANCELLED
         self.agreement_repo.session.add(agreement)
         self.agreement_repo.session.commit()
         self.agreement_repo.session.refresh(agreement)

@@ -12,6 +12,27 @@ class InvitationStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class AgreementStatus(StrEnum):
+    """The values actually written to `Agreement.status`.
+
+    NOTE: `Agreement.status` stays a plain `str` column. Annotating the model
+    field with this enum would make SQLModel infer a native PG enum that stores
+    member *names* — the same trap described in the ledger banner below — and
+    forcing an explicit Column(String(20)) would emit a spurious ALTER against a
+    live column. Use these members for comparison and assignment only; leave the
+    column type alone.
+    """
+
+    PENDING = "pending"
+    ACTIVE = "active"
+    DISPUTED = "disputed"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    # Nothing writes this today. Retained because `prepare_escrow_funding`
+    # read-guards on it.
+    REFUNDED = "refunded"
+
+
 class NotificationType(StrEnum):
     INVITATION_RECEIVED = "invitation_received"
     AGREEMENT_ACCEPTED = "agreement_accepted"
@@ -24,6 +45,10 @@ class NotificationType(StrEnum):
     WALLET_CREDITED = "wallet_credited"
     WITHDRAWAL_COMPLETED = "withdrawal_completed"
     WITHDRAWAL_FAILED = "withdrawal_failed"
+    DISPUTE_RAISED = "dispute_raised"
+    DISPUTE_EVIDENCE_ADDED = "dispute_evidence_added"
+    DISPUTE_UNDER_REVIEW = "dispute_under_review"
+    DISPUTE_RESOLVED = "dispute_resolved"
     GENERAL = "general"
 
 
@@ -70,3 +95,39 @@ class WebhookEventStatus(StrEnum):
 class IdempotencyStatus(StrEnum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
+
+
+# ---------------------------------------------------------------------------
+# Disputes
+#
+# Same rule as the ledger enums above: these are persisted through an explicit
+# `sa_column=Column(String(n))`, never inferred from the StrEnum.
+# ---------------------------------------------------------------------------
+
+
+class DisputeCategory(StrEnum):
+    QUALITY_ISSUES = "quality_issues"
+    MISSED_DEADLINE = "missed_deadline"
+    INCOMPLETE_WORK = "incomplete_work"
+    NON_RESPONSIVE = "non_responsive"
+    OTHER = "other"
+
+
+class DisputeStatus(StrEnum):
+    OPEN = "open"  # raised, not yet picked up
+    UNDER_REVIEW = "under_review"  # an admin has claimed it
+    RESOLVED = "resolved"  # terminal — an admin issued a binding outcome
+
+
+class DisputeResolutionOutcome(StrEnum):
+    """Record-only. None of these move money.
+
+    Resolving a dispute writes the outcome and unfreezes the agreement; the
+    actual payout or refund remains the existing release flow / a manual ops
+    action.
+    """
+
+    FAVOUR_DEPOSITOR = "favour_depositor"
+    FAVOUR_BENEFICIARY = "favour_beneficiary"
+    SPLIT = "split"
+    DISMISSED = "dismissed"

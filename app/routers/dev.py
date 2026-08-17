@@ -56,3 +56,32 @@ def dev_login(
     )
 
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.post("/dev-promote-admin", include_in_schema=True)
+def dev_promote_admin(email: str, session: SessionDep):
+    """
+    **Dev only — not available in production.**
+
+    Grant platform-admin rights to a user by email, so the /admin/disputes
+    routes can be exercised locally. In production this is a deliberate SQL
+    statement instead:
+
+        UPDATE "user" SET is_admin = true WHERE email = '...';
+    """
+    user = session.exec(select(User).where(User.email == email)).first()
+
+    if not user:
+        raise UserNotFoundError("No user found with that email")
+
+    user.is_admin = True
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+
+    logger.warning(
+        "user promoted to admin via dev route — ensure DEBUG=false in production",
+        extra={"user_id": user.id, "email": user.email},
+    )
+
+    return {"id": user.id, "email": user.email, "is_admin": user.is_admin}

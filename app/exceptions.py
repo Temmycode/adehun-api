@@ -23,6 +23,11 @@ class WithdrawalNotAllowedError(AppError):
         super().__init__(message=message, code="FORBIDDEN", status_code=403)
 
 
+class AdminAccessRequiredError(AppError):
+    def __init__(self, message: str = "Administrator access required"):
+        super().__init__(message=message, code="FORBIDDEN", status_code=403)
+
+
 # 404s
 class UserNotFoundError(AppError):
     def __init__(self, message: str = "User not found"):
@@ -64,6 +69,11 @@ class BankAccountNotFoundError(AppError):
         super().__init__(message=message, code="NOT_FOUND", status_code=404)
 
 
+class DisputeNotFoundError(AppError):
+    def __init__(self, message: str = "Dispute not found"):
+        super().__init__(message=message, code="NOT_FOUND", status_code=404)
+
+
 # 409s
 class UserAlreadyExistsError(AppError):
     def __init__(self, message: str = "User already exists"):
@@ -89,6 +99,16 @@ class InsufficientEscrowBalanceError(AppError):
 
 class DuplicateBankAccountError(AppError):
     def __init__(self, message: str = "This bank account is already saved"):
+        super().__init__(message=message, code="CONFLICT", status_code=409)
+
+
+class DisputeAlreadyExistsError(AppError):
+    def __init__(self, message: str = "This agreement already has an open dispute"):
+        super().__init__(message=message, code="CONFLICT", status_code=409)
+
+
+class DisputeNotOpenError(AppError):
+    def __init__(self, message: str = "This dispute is no longer open"):
         super().__init__(message=message, code="CONFLICT", status_code=409)
 
 
@@ -156,3 +176,8 @@ class WalletNotFoundError(AppError):
 class PaystackTransactionNotFoundError(AppError):
     def __init__(self, message: str = "Paystack Transaction not found"):
         super().__init__(message=message, code="NOT_FOUND", status_code=404)
+
+
+class DisputeCreationError(AppError):
+    def __init__(self, message: str = "Failed to raise dispute"):
+        super().__init__(message=message, code="INTERNAL_SERVER_ERROR", status_code=500)

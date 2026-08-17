@@ -1,7 +1,8 @@
 from app.logging import get_logger
 
-from sqlmodel import Session, func, select
+from sqlmodel import Session, col, func, select
 
+from app.common.enums import AgreementStatus
 from app.models import Agreement, AgreementParticipant
 
 logger = get_logger(__name__)
@@ -13,14 +14,21 @@ class StatsRepository:
 
     def get_user_stats(self, user_id: str) -> tuple[int, int, int]:
         """Get user stats by user id."""
+        # `disputed` counts as active: a frozen agreement is still in flight,
+        # and dropping it would make a user's agreement appear to vanish from
+        # their dashboard the moment they raise a dispute.
         active_agreements_count = (
             func.count(Agreement.id)  # pyright: ignore[reportArgumentType]
-            .filter(Agreement.status == "active")  # pyright: ignore[reportArgumentType]
+            .filter(  # pyright: ignore[reportArgumentType]
+                col(Agreement.status).in_(
+                    (AgreementStatus.ACTIVE, AgreementStatus.DISPUTED)
+                )
+            )
             .label("active")
         )
         completed_agreements_count = (
             func.count(Agreement.id)  # pyright: ignore[reportArgumentType]
-            .filter(Agreement.status == "completed")  # pyright: ignore[reportArgumentType]
+            .filter(Agreement.status == AgreementStatus.COMPLETED)  # pyright: ignore[reportArgumentType]
             .label("completed")
         )
         total_agreements_count = func.count(Agreement.id).label(  # pyright: ignore[reportArgumentType]
