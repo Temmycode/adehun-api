@@ -238,6 +238,9 @@ class AgreementService:
                 invitation_token,
                 invitation_data.model_dump(mode="json"),
             )
+        # NOTE: WEB_URL currently points at the API host, which has no /invite
+        # route — so these links 404. They are only correct once WEB_URL points
+        # at a deployed frontend that handles /invite?token=...
         invitation_link = f"{settings.web_url}/invite?token={invitation_token}"
         background_tasks.add_task(
             email_service.send_invitation_email,

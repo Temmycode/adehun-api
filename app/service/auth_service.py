@@ -5,7 +5,11 @@ from firebase_admin import auth
 from app.common.enums import NotificationType
 from app.service import token_service
 from app.service.notification_service import NotificationService
-from app.exceptions import InvitationNotFoundError, UserNotFoundError
+from app.exceptions import (
+    InvitationNotFoundError,
+    UnauthorizedError,
+    UserNotFoundError,
+)
 from app.models import User
 from app.repository.user_repository import UserRepository
 from app.schemas.auth_schema import LoginResponse, UserCreateRequest
@@ -66,8 +70,26 @@ class AuthService:
 
         is_signed_up = False
 
-        # Verify the ID token using Firebase Admin SDK
-        decoded_token = auth.verify_id_token(id_token)
+        # Verify the ID token using Firebase Admin SDK.
+        #
+        # Firebase raises on a malformed, expired or revoked token. Without
+        # this, those escape to the catch-all handler in main.py and the client
+        # gets a 500 — indistinguishable from the server being broken, so it
+        # cannot know to re-authenticate. These are credential failures: 401.
+        try:
+            decoded_token = auth.verify_id_token(id_token)
+        except (
+            auth.InvalidIdTokenError,
+            auth.ExpiredIdTokenError,
+            auth.RevokedIdTokenError,
+            auth.CertificateFetchError,
+            ValueError,
+        ) as exc:
+            logger.info(
+                "firebase id token rejected",
+                extra={"reason": type(exc).__name__},
+            )
+            raise UnauthorizedError("Invalid or expired credentials") from exc
 
         # Get the user ID from the decoded token
         user_id = decoded_token["uid"]

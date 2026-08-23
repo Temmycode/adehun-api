@@ -22,6 +22,13 @@ class Settings(BaseSettings):
     redis_database_password: str
     redis_database_port: str
     resend_api_key: str | None = None
+    # Sender for transactional email. MUST be on a domain verified in Resend —
+    # Resend rejects anything else, and a free-mail domain (gmail.com etc.)
+    # can never be verified because you do not own it. Set RESEND_FROM_EMAIL
+    # to your verified address; the default only works in Resend's sandbox,
+    # which delivers solely to your own account address.
+    # "Adehun <invites@yourdomain.com>" is also a valid form.
+    resend_from_email: str = "onboarding@resend.dev"
     web_url: str
     debug: bool = True
     paystack_test_public_key: str

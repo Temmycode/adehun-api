@@ -4,6 +4,7 @@ from app.core.response import (
     APIResponse,
     InternalServerErrorResponse,
     NotFoundResponse,
+    UnauthorizedResponse,
     success_response,
 )
 from app.dependencies import AuthServiceDep
@@ -60,7 +61,12 @@ async def invite_register(
     return success_response(data=auth_service.verify_id_token(register_data.id_token))
 
 
-@router.post("/login", status_code=200, response_model=APIResponse[LoginResponse])
+@router.post(
+    "/login",
+    status_code=200,
+    response_model=APIResponse[LoginResponse],
+    responses={401: {"model": UnauthorizedResponse}},
+)
 @limiter.limit("5/minute")
 async def login(
     request: Request,
@@ -74,7 +80,12 @@ async def login(
     return success_response(data=auth_service.verify_id_token(login_data.id_token))
 
 
-@router.post("/refresh", status_code=200, response_model=APIResponse[LoginResponse])
+@router.post(
+    "/refresh",
+    status_code=200,
+    response_model=APIResponse[LoginResponse],
+    responses={401: {"model": UnauthorizedResponse}},
+)
 @limiter.limit("10/minute")
 async def refresh_token(
     request: Request,

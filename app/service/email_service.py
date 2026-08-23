@@ -15,7 +15,7 @@ def send_invitation_email(email: str, invitation_link: str):
     try:
         resend.Emails.send(
             {
-                "from": "tolutech2004@gsmail.com",
+                "from": settings.resend_from_email,
                 "to": email,
                 "subject": "You've been invited to join Adehun",
                 "html": f"<p>You've been invited to join Adehun. Click <a href='{invitation_link}'>here</a> to accept.</p>",

@@ -12,6 +12,12 @@ class BadRequestError(AppError):
         super().__init__(message=message, code="BAD_REQUEST", status_code=400)
 
 
+# 401s
+class UnauthorizedError(AppError):
+    def __init__(self, message: str = "Could not validate credentials"):
+        super().__init__(message=message, code="UNAUTHORIZED", status_code=401)
+
+
 # 403s
 class ForbiddenError(AppError):
     def __init__(self, message: str = "Access is forbidden"):
