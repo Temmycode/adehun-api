@@ -221,9 +221,14 @@ class WalletService:
     ) -> LedgerResult:
         """Return escrowed money to the depositor.
 
-        No endpoint exposes this yet — there is no admin/role concept in the
-        codebase to authorise it. It exists so the ledger path is in place and
-        ops can drive it deliberately.
+        Exposed by POST /agreements/{id}/refund, which is admin-only. That is
+        the payout step for a dispute resolved `favour_depositor`, and the way
+        a funded agreement gets unwound.
+
+        The reference is one-per-agreement, so a repeat call replays rather
+        than refunding twice. That also means PARTIAL refunds are impossible
+        here — a `split` dispute outcome cannot be settled through this method
+        and needs a per-resolution reference scheme first.
         """
         return self.wallet_repo.apply_entry(
             user_id=depositor_user_id,

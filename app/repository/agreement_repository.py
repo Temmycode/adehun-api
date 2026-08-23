@@ -155,6 +155,23 @@ class AgreementRepository(RedisClient):
             logger.info("agreement not found", extra={"agreement_id": agreement_id})
         return agreement
 
+    def get_attached(self, agreement_id: str) -> Agreement | None:
+        """Return a SESSION-ATTACHED agreement, bypassing the read cache.
+
+        MUST be used by any code path that mutates an agreement.
+
+        `get_by_id` returns `Agreement.model_validate(cached)` on a Redis hit —
+        a TRANSIENT object with no session identity. Mutating that and calling
+        `save_agreement` makes SQLAlchemy treat it as a new row, so the flush
+        emits an INSERT with an already-existing primary key and blows up with
+        a duplicate-key IntegrityError instead of updating the status.
+
+        The failure only appears on a cache hit, which is why the status
+        transitions could look fine in testing and then break in production
+        once Redis was warm.
+        """
+        return self.session.get(Agreement, agreement_id)
+
     def get_user_by_email_or_phone(self, email_or_phone: str) -> User | None:
         """Return a user by their email or phone."""
         return self.session.exec(

@@ -18,7 +18,7 @@ from app.dependencies import (
     WalletServiceDep,
 )
 from app.logging import get_logger
-from app.routers.agreement import perform_escrow_release
+from app.routers.agreement import broadcast_agreement_update, perform_escrow_release
 from app.rate_limiting import limiter
 from app.schemas.conditions_schema import (
     BatchConditionResponse,
@@ -83,7 +83,7 @@ def _notify_agreement_participants(
             )
 
 
-def _release_escrow_if_ready(
+async def _release_escrow_if_ready(
     *,
     agreement_id: str,
     user_id: str,
@@ -132,6 +132,11 @@ def _release_escrow_if_ready(
         logger.info(
             "escrow released automatically on final condition approval",
             extra={"agreement_id": agreement_id},
+        )
+        # The agreement just moved to `completed`; tell both parties, so the
+        # client's /agreements/ws listener sees the automatic release too.
+        await broadcast_agreement_update(
+            agreement_service, agreement_id, event="released"
         )
     except Exception:
         logger.exception(
@@ -250,7 +255,7 @@ async def approve_condition(
         },
     )
 
-    _release_escrow_if_ready(
+    await _release_escrow_if_ready(
         agreement_id=agreement_id,
         user_id=current_user.id,
         condition_service=condition_service,

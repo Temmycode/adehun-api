@@ -3,6 +3,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel
 
+from app.common.enums import AgreementStatus
+
 from app.schemas.conditions_schema import ConditionCreate, ConditionResponse
 from app.schemas.participant_schema import ParticipantResponse
 from app.schemas.user_schema import UserResponse
@@ -13,6 +15,10 @@ class AgreementInvitationResponse(BaseModel):
     email: str
     token: str
     role: str
+    # NOTE: this is the INVITATION's status, not the agreement's. The column
+    # takes pending/accepted/expired, which is a different vocabulary from the
+    # InvitationStatus enum (invited/accepted/rejected) used by
+    # AgreementParticipant.status. Left untyped until those two are reconciled.
     status: str
     expires_at: datetime
 
@@ -37,7 +43,7 @@ class AgreementResponse(BaseModel):
     title: str
     description: str
     amount: Decimal
-    status: str
+    status: AgreementStatus
     depositor: ParticipantResponse | None = None
     beneficiary: ParticipantResponse | None = None
     created_at: datetime

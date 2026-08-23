@@ -254,6 +254,34 @@ def get_idempotency_context(
 IdempotencyDep = Annotated[IdempotencyContext, Depends(get_idempotency_context)]
 
 
+def get_required_idempotency_context(
+    repo: IdempotencyRepositoryDep,
+    current_user: ActiveUserDep,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key")],
+):
+    """Same as `get_idempotency_context`, but the header is mandatory.
+
+    Used by the money-moving routes, whose docs have always said the header is
+    required while the OpenAPI schema said `required: false` — a mismatch that
+    invited clients to trust the schema and silently lose replay protection.
+    No default here, so FastAPI publishes `required: true` and rejects a
+    request without the header with a 422 before any money moves.
+
+    The ledger's UNIQUE index on `transaction.reference` remains the durable
+    guarantee; this is about the client contract being honest.
+    """
+    context = IdempotencyContext(repo, current_user.id, idempotency_key)
+    try:
+        yield context
+    finally:
+        context.release_if_abandoned()
+
+
+RequiredIdempotencyDep = Annotated[
+    IdempotencyContext, Depends(get_required_idempotency_context)
+]
+
+
 def get_dispute_repository(
     session: SessionDep, redis_client: RedisDep
 ) -> DisputeRepository:

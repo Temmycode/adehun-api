@@ -128,7 +128,7 @@ class AgreementService:
         """
         context = self.get_escrow_context(agreement_id)
 
-        agreement = self.agreement_repo.get_by_id(agreement_id)
+        agreement = self.agreement_repo.get_attached(agreement_id)
         if agreement is None:
             raise AgreementNotFoundError()
 
@@ -143,12 +143,53 @@ class AgreementService:
                 "This agreement is under dispute and cannot be released"
             )
 
+        # A cancelled deal is dead and a refunded one has already paid the
+        # escrow back to the depositor — in both cases there is nothing left to
+        # release. COMPLETED is deliberately NOT blocked: re-running a release
+        # is the idempotent fallback path, and the `esc_rel_{id}` reference
+        # collapses it to a replay.
+        if agreement.status in {
+            AgreementStatus.CANCELLED,
+            AgreementStatus.REFUNDED,
+        }:
+            raise BadRequestError(
+                f"An agreement that is {agreement.status} cannot be released"
+            )
+
         agreement.status = AgreementStatus.COMPLETED
         self.agreement_repo.save_agreement(agreement, commit=False)
         return context
 
-    def mark_agreement_completed_cache(self, agreement_id: str) -> None:
-        """Drop the cached agreement after a release.
+    def prepare_refund(self, agreement_id: str) -> EscrowContext:
+        """Authorise returning escrowed money to the depositor.
+
+        The counterpart to `prepare_release`. Like it, the status change is
+        FLUSHED, not committed, so the following ledger entry commits it in the
+        same DB transaction as the money — if the refund fails, the rollback
+        inside the wallet repository discards this too.
+
+        Deliberately does NOT block an agreement that is already `refunded`:
+        the ledger reference `esc_ref_{agreement_id}` makes a repeat call a
+        no-op replay, and blocking here would break that idempotent retry.
+        """
+        context = self.get_escrow_context(agreement_id)
+
+        agreement = self.agreement_repo.get_attached(agreement_id)
+        if agreement is None:
+            raise AgreementNotFoundError()
+
+        if agreement.status == AgreementStatus.COMPLETED:
+            raise BadRequestError(
+                "This agreement has already been released to the beneficiary "
+                "and cannot be refunded"
+            )
+
+        agreement.status = AgreementStatus.REFUNDED
+        self.agreement_repo.save_agreement(agreement, commit=False)
+        return context
+
+    def invalidate_agreement_cache(self, agreement_id: str) -> None:
+        """Drop the cached agreement for both participants after a state change.
 
         Easy to forget, and without it `get_by_id` serves a stale status from
         Redis for five minutes.
@@ -161,10 +202,14 @@ class AgreementService:
             )
         except Exception:
             logger.warning(
-                "failed to invalidate agreement cache after release",
+                "failed to invalidate agreement cache",
                 extra={"agreement_id": agreement_id},
                 exc_info=True,
             )
+
+    def mark_agreement_completed_cache(self, agreement_id: str) -> None:
+        """Back-compat alias for `invalidate_agreement_cache`."""
+        self.invalidate_agreement_cache(agreement_id)
 
     def _invite_participant(
         self,
@@ -428,7 +473,7 @@ class AgreementService:
         self.agreement_repo.session.commit()
         self.agreement_repo.session.refresh(participant)
 
-        agreement = self.agreement_repo.get_by_id(agreement_id)
+        agreement = self.agreement_repo.get_attached(agreement_id)
         if agreement is None:
             raise AgreementNotFoundError()
 
@@ -457,6 +502,50 @@ class AgreementService:
             agreement_id, invitation.id, participant.id
         )
 
+        return self.get_agreement(agreement_id, user_id)
+
+    def cancel_agreement(self, agreement_id: str, user_id: str) -> AgreementResponse:
+        """Cancel an agreement the caller is a participant on.
+
+        This is what the app's "Cancel Agreement" button means, and it is a
+        different thing from `reject_agreement`, which declines an INVITATION
+        before you have joined.
+
+        The funded case is NOT handled here. Whether money sits in escrow is a
+        ledger question, and services do not call each other — so the route
+        checks `is_agreement_funded` and refuses before reaching this method.
+        A funded deal has to go through dispute -> admin refund instead, or no
+        unilateral cancel would be safe: the depositor could otherwise pull
+        their money the moment the beneficiary started work.
+        """
+        agreement = self.agreement_repo.get_attached(agreement_id)
+        if agreement is None:
+            raise AgreementNotFoundError()
+
+        participant = self.agreement_repo.get_participant_for_user(
+            agreement_id, user_id
+        )
+        if participant is None:
+            raise ForbiddenError("You are not a participant on this agreement")
+
+        if agreement.status == AgreementStatus.CANCELLED:
+            return self.get_agreement(agreement_id, user_id)
+
+        if agreement.status != AgreementStatus.PENDING and (
+            agreement.status != AgreementStatus.ACTIVE
+        ):
+            raise BadRequestError(
+                f"An agreement that is {agreement.status} cannot be cancelled"
+            )
+
+        agreement.status = AgreementStatus.CANCELLED
+        self.agreement_repo.save_agreement(agreement)
+        self.invalidate_agreement_cache(agreement_id)
+
+        logger.info(
+            "agreement cancelled",
+            extra={"agreement_id": agreement_id, "cancelled_by": user_id},
+        )
         return self.get_agreement(agreement_id, user_id)
 
     def reject_agreement(
@@ -506,7 +595,7 @@ class AgreementService:
         self.agreement_repo.session.commit()
         self.agreement_repo.session.refresh(participant)
 
-        agreement = self.agreement_repo.get_by_id(agreement_id)
+        agreement = self.agreement_repo.get_attached(agreement_id)
         if agreement is None:
             raise AgreementNotFoundError()
 

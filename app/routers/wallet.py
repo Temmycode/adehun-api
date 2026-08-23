@@ -18,6 +18,7 @@ from app.core.response import (
 from app.dependencies import (
     ActiveUserDep,
     IdempotencyDep,
+    RequiredIdempotencyDep,
     NotificationServiceDep,
     PaystackWebhookServiceDep,
     WalletServiceDep,
@@ -107,7 +108,7 @@ async def withdraw(
     payload: WithdrawalCreate,
     current_user: ActiveUserDep,
     wallet_service: WalletServiceDep,
-    idem: IdempotencyDep,
+    idem: RequiredIdempotencyDep,
 ):
     """Withdraw to a bank account.
 
@@ -151,6 +152,13 @@ async def get_withdrawal(
 
 @router.websocket("/ws")
 async def wallet_websocket(websocket: WebSocket, wallet_service: WalletServiceDep):
+    """Live wallet balance for the authenticated user.
+
+    Auth is `?token=<access_token>`. Pushes a WALLET_STATE frame on connect and
+    again whenever a webhook changes the balance. In-process only, so it does
+    not fan out across workers — `GET /wallet` is the fallback and the source of
+    truth. Frame shapes: docs/websockets.md.
+    """
     user_id = get_user_id_from_ws(websocket)
     if not user_id:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)

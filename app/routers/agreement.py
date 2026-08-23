@@ -13,9 +13,11 @@ from app.core.response import (
 )
 from app.dependencies import (
     ActiveUserDep,
+    AdminUserDep,
     AgreementServiceDep,
     ConditionServiceDep,
     IdempotencyDep,
+    RequiredIdempotencyDep,
     NotificationServiceDep,
     TransactionServiceDep,
     UserRepositoryDep,
@@ -100,11 +102,43 @@ async def _send_agreement_ws_payload(user_id: str, agreement, event: str = "upda
         )
 
 
+async def broadcast_agreement_update(
+    agreement_service,
+    agreement_id: str,
+    event: str = "updated",
+) -> None:
+    """Push the current agreement state to both participants over /agreements/ws.
+
+    Best-effort: a websocket failure must never break the HTTP request that
+    triggered it.
+    """
+    try:
+        agreement = agreement_service.get_agreement(agreement_id)
+        recipients = {
+            p.user.id
+            for p in (agreement.depositor, agreement.beneficiary)
+            if p is not None and p.user is not None
+        }
+        for user_id in recipients:
+            await _send_agreement_ws_payload(user_id, agreement, event=event)
+    except Exception:
+        logger.exception(
+            "failed to broadcast agreement update",
+            extra={"agreement_id": agreement_id, "event": event},
+        )
+
+
 @router.websocket("/ws")
 async def agreement_websocket(
     websocket: WebSocket,
     agreement_service: AgreementServiceDep,
 ):
+    """Agreement and dispute events for the authenticated user.
+
+    Auth is `?token=<access_token>` — WebSocket handshakes cannot carry an
+    Authorization header. Frame shapes are documented in docs/websockets.md;
+    FastAPI does not emit WebSocket routes into openapi.json.
+    """
     user_id = get_user_id_from_ws(websocket)
     if not user_id:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
@@ -305,8 +339,10 @@ async def accept_agreement(
     "/{agreement_id}/reject",
     response_model=APIResponse[AgreementResponse],
     responses={
+        400: {"model": BadRequestResponse},
         401: {"model": UnauthorizedResponse},
         403: {"model": ForbiddenResponse},
+        404: {"model": NotFoundResponse},
     },
 )
 @limiter.limit("10/minute")
@@ -314,14 +350,37 @@ async def reject_agreement(
     request: Request,
     current_user: ActiveUserDep,
     agreement_service: AgreementServiceDep,
+    transaction_service: TransactionServiceDep,
     notification_service: NotificationServiceDep,
     agreement_id: str,
     idem: IdempotencyDep,
 ):
-    """Reject an agreement."""
+    """Decline an invitation to an agreement.
+
+    This is for declining BEFORE you have joined. To end an agreement you have
+    already accepted, use `POST /agreements/{id}/cancel`. Both end with the
+    agreement `cancelled`, but only this one also marks your invitation
+    rejected.
+
+    Refuses once the escrow is funded — cancelling then would strand the money
+    with no way to get it back. A funded deal has to go through
+    `POST /agreements/{id}/disputes` and an admin refund instead.
+
+    Send an `Idempotency-Key` header to make a retry safe.
+    """
     replay = idem.begin("POST /agreements/{id}/reject", {"agreement_id": agreement_id})
     if replay is not None:
         return replay
+
+    # Checked here rather than in the service: whether money sits in escrow is
+    # a ledger question, and services never call other services.
+    if transaction_service.is_agreement_funded(
+        agreement_id
+    ) and not transaction_service.is_agreement_released(agreement_id):
+        raise BadRequestError(
+            "This agreement is funded and cannot be rejected. "
+            "Raise a dispute so an admin can refund the escrow."
+        )
 
     agreement = agreement_service.reject_agreement(
         agreement_id, current_user.id, current_user.email
@@ -436,7 +495,7 @@ async def fund_agreement(
     wallet_service: WalletServiceDep,
     transaction_service: TransactionServiceDep,
     notification_service: NotificationServiceDep,
-    idem: IdempotencyDep,
+    idem: RequiredIdempotencyDep,
 ):
     """Move the agreement amount from the depositor's available balance into escrow.
 
@@ -517,7 +576,7 @@ async def release_agreement_escrow(
     wallet_service: WalletServiceDep,
     transaction_service: TransactionServiceDep,
     notification_service: NotificationServiceDep,
-    idem: IdempotencyDep,
+    idem: RequiredIdempotencyDep,
 ):
     """Release escrow to the beneficiary.
 
@@ -553,6 +612,8 @@ async def release_agreement_escrow(
         notification_service,
     )
 
+    await broadcast_agreement_update(agreement_service, agreement_id, event="released")
+
     idem.bind_reference(result.debit.reference)
     return idem.complete(
         success_response(
@@ -562,6 +623,191 @@ async def release_agreement_escrow(
                 reference=result.debit.reference,
                 available_balance=result.debit.balance_after,
                 escrow_balance=result.debit.escrow_after,
+                replayed=result.replayed,
+            )
+        )
+    )
+
+
+@router.post(
+    "/{agreement_id}/cancel",
+    response_model=APIResponse[AgreementResponse],
+    responses={
+        400: {"model": BadRequestResponse},
+        401: {"model": UnauthorizedResponse},
+        403: {"model": ForbiddenResponse},
+        404: {"model": NotFoundResponse},
+    },
+)
+@limiter.limit("10/minute")
+async def cancel_agreement(
+    request: Request,
+    agreement_id: str,
+    current_user: ActiveUserDep,
+    agreement_service: AgreementServiceDep,
+    transaction_service: TransactionServiceDep,
+    notification_service: NotificationServiceDep,
+):
+    """Cancel an agreement you are a participant on.
+
+    Callable by either participant while the agreement is `pending` or
+    `active`, and only while the escrow is UNFUNDED. Once money is in escrow a
+    unilateral cancel would let the depositor pull their funds the moment the
+    beneficiary started work, so a funded deal must go through
+    `POST /agreements/{id}/disputes` and an admin refund instead.
+
+    Already-cancelled agreements return 200 with no change, so a double tap is
+    harmless.
+    """
+    if transaction_service.is_agreement_funded(
+        agreement_id
+    ) and not transaction_service.is_agreement_released(agreement_id):
+        raise BadRequestError(
+            "This agreement is funded and cannot be cancelled. "
+            "Raise a dispute so an admin can refund the escrow."
+        )
+
+    agreement = agreement_service.cancel_agreement(agreement_id, current_user.id)
+
+    participant_ids = [
+        p.user.id
+        for p in (agreement.depositor, agreement.beneficiary)
+        if p is not None and p.user is not None
+    ]
+    for uid in participant_ids:
+        if uid == current_user.id:
+            continue
+        try:
+            notification_service.create_notification(
+                user_id=uid,
+                type=NotificationType.AGREEMENT_CANCELLED,
+                title="Agreement Cancelled",
+                message=f"{current_user.name} cancelled '{agreement.title}'",
+                metadata={"agreement_id": agreement.id},
+            )
+        except Exception:
+            logger.exception(
+                "failed to create agreement-cancelled notification",
+                extra={"agreement_id": agreement.id, "recipient_id": uid},
+            )
+
+    for uid in set(participant_ids + [current_user.id]):
+        await _send_agreement_ws_payload(uid, agreement, event="cancelled")
+
+    return success_response(data=agreement)
+
+
+@router.post(
+    "/{agreement_id}/refund",
+    response_model=APIResponse[EscrowMovementResponse],
+    responses={
+        400: {"model": BadRequestResponse},
+        401: {"model": UnauthorizedResponse},
+        403: {"model": ForbiddenResponse},
+        404: {"model": NotFoundResponse},
+        409: {"model": ConflictResponse},
+    },
+)
+@limiter.limit("5/minute")
+async def refund_agreement_escrow(
+    request: Request,
+    agreement_id: str,
+    current_user: AdminUserDep,
+    agreement_service: AgreementServiceDep,
+    wallet_service: WalletServiceDep,
+    transaction_service: TransactionServiceDep,
+    notification_service: NotificationServiceDep,
+    idem: RequiredIdempotencyDep,
+):
+    """Return escrowed money to the depositor. **Admin only.**
+
+    The counterpart to `/release`, and the way a dispute resolved
+    `favour_depositor` actually pays out — resolving a dispute records the
+    decision but moves no money, so this is the explicit second step.
+
+    Also the remedy when a funded agreement needs to be unwound for any other
+    reason. Sets the agreement to `refunded`, which permanently blocks any
+    later funding or release.
+
+    Restricted to admins because it moves money against the beneficiary's
+    interest. Idempotent on the ledger reference `esc_ref_{agreement_id}`, so a
+    repeat call is a no-op replay rather than a second refund.
+
+    Requires an `Idempotency-Key` header.
+    """
+    replay = idem.begin("POST /agreements/{id}/refund", {"agreement_id": agreement_id})
+    if replay is not None:
+        return replay
+
+    if not transaction_service.is_agreement_funded(agreement_id):
+        raise BadRequestError("This agreement has not been funded")
+    if transaction_service.is_agreement_released(agreement_id):
+        raise BadRequestError(
+            "This agreement's escrow has already been released to the beneficiary"
+        )
+
+    # Flushes status = refunded, committed atomically with the ledger entry.
+    context = agreement_service.prepare_refund(agreement_id)
+
+    result = wallet_service.refund_escrow(
+        agreement_id=agreement_id,
+        depositor_user_id=context.depositor_user_id,
+        amount=context.amount,
+        description=f"Escrow refund for '{context.title}'",
+    )
+
+    # Without this, get_by_id serves a stale status from Redis for 5 minutes.
+    agreement_service.invalidate_agreement_cache(agreement_id)
+
+    for user_id, message in (
+        (
+            context.depositor_user_id,
+            f"{context.amount} has been refunded to you for '{context.title}'",
+        ),
+        (
+            context.beneficiary_user_id,
+            f"The escrow for '{context.title}' was refunded to the depositor",
+        ),
+    ):
+        try:
+            notification_service.create_notification(
+                user_id=user_id,
+                type=NotificationType.ESCROW_REFUNDED,
+                title="Escrow Refunded",
+                message=message,
+                metadata={
+                    "agreement_id": agreement_id,
+                    "amount": str(context.amount),
+                },
+            )
+        except Exception:
+            logger.exception(
+                "failed to create escrow refund notification",
+                extra={"agreement_id": agreement_id, "recipient_id": user_id},
+            )
+
+    agreement_payload = agreement_service.get_agreement(agreement_id)
+    for uid in (context.depositor_user_id, context.beneficiary_user_id):
+        await _send_agreement_ws_payload(uid, agreement_payload, event="refunded")
+
+    logger.warning(
+        "escrow refunded by admin",
+        extra={
+            "agreement_id": agreement_id,
+            "admin_user_id": current_user.id,
+            "amount": str(context.amount),
+        },
+    )
+
+    idem.bind_reference(result.entry.reference)
+    return idem.complete(
+        success_response(
+            data=EscrowMovementResponse(
+                agreement_id=agreement_id,
+                amount=context.amount,
+                reference=result.entry.reference,
+                available_balance=result.wallet.available_balance,
+                escrow_balance=result.wallet.escrow_balance,
                 replayed=result.replayed,
             )
         )

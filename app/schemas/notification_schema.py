@@ -3,10 +3,12 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.common.enums import NotificationType
+
 
 class NotificationResponse(BaseModel):
     id: str
-    type: str
+    type: NotificationType
     title: str
     message: str
     metadata: dict[str, Any] | None = Field(

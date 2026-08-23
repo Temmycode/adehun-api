@@ -28,8 +28,8 @@ class AgreementStatus(StrEnum):
     DISPUTED = "disputed"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
-    # Nothing writes this today. Retained because `prepare_escrow_funding`
-    # read-guards on it.
+    # Written by POST /agreements/{id}/refund, the admin lever that returns
+    # escrowed money to the depositor.
     REFUNDED = "refunded"
 
 
@@ -40,8 +40,10 @@ class NotificationType(StrEnum):
     CONDITION_ADDED = "condition_added"
     CONDITION_UPDATED = "condition_updated"
     AGREEMENT_COMPLETED = "agreement_completed"
+    AGREEMENT_CANCELLED = "agreement_cancelled"
     ESCROW_FUNDED = "escrow_funded"
     ESCROW_RELEASED = "escrow_released"
+    ESCROW_REFUNDED = "escrow_refunded"
     WALLET_CREDITED = "wallet_credited"
     WITHDRAWAL_COMPLETED = "withdrawal_completed"
     WITHDRAWAL_FAILED = "withdrawal_failed"
@@ -120,11 +122,16 @@ class DisputeStatus(StrEnum):
 
 
 class DisputeResolutionOutcome(StrEnum):
-    """Record-only. None of these move money.
+    """Record-only. None of these move money by themselves.
 
-    Resolving a dispute writes the outcome and unfreezes the agreement; the
-    actual payout or refund remains the existing release flow / a manual ops
-    action.
+    Resolving a dispute writes the outcome and unfreezes the agreement. Moving
+    the money is a separate, explicit call:
+      * FAVOUR_BENEFICIARY -> POST /agreements/{id}/release
+      * FAVOUR_DEPOSITOR   -> POST /agreements/{id}/refund   (admin)
+      * SPLIT              -> no single endpoint; ops must settle it manually,
+                              because the ledger reference scheme allows only
+                              one full refund per agreement.
+      * DISMISSED          -> nothing moves; the deal resumes.
     """
 
     FAVOUR_DEPOSITOR = "favour_depositor"
