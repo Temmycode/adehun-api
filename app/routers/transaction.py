@@ -42,7 +42,7 @@ async def get_transactions(
     request: Request,
     current_user: ActiveUserDep,
     transaction_service: TransactionServiceDep,
-    skip: int = 0,
+    skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     type: list[LedgerEntryType] | None = Query(
         None, description="Repeatable, e.g. ?type=deposit&type=withdrawal"

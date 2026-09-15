@@ -22,6 +22,9 @@ from app.redis import RedisClient
 
 logger = get_logger(__name__)
 
+# How many times a failed event may be re-driven by provider redelivery.
+MAX_ATTEMPTS = 5
+
 
 class WebhookEventRepository(RedisClient):
     def __init__(self, session: Session, redis_client: Redis | None):
@@ -66,7 +69,12 @@ class WebhookEventRepository(RedisClient):
                     "attempts": text("webhook_event.attempts + 1"),
                     "received_at": now,
                 },
-                where=WebhookEvent.__table__.c.status == WebhookEventStatus.FAILED.value,
+                # Re-drive failed events, but not forever: a deterministic bug
+                # would otherwise turn into an endless Paystack redelivery loop.
+                where=(
+                    (WebhookEvent.__table__.c.status == WebhookEventStatus.FAILED.value)
+                    & (WebhookEvent.__table__.c.attempts < MAX_ATTEMPTS)
+                ),
             )
             .returning(WebhookEvent.__table__.c.id)
         )

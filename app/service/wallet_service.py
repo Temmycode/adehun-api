@@ -117,21 +117,30 @@ class WalletService:
         """
         reference = generate_fund_reference(user_id)
 
-        data = await paystack_client.initialize_transaction(
-            email=user_email,
-            amount_kobo=to_kobo(wallet_data.amount),
-            reference=reference,
-            channels=[wallet_data.channel],
-            callback_url=settings.paystack_callback_url,
-        )
-
-        self.wallet_repo.create_paystack_transaction(
+        # Record the intent FIRST. If the row write happened after the Paystack
+        # call and failed, a live payment page would exist with no local record
+        # and the eventual charge.success would be dropped as unknown.
+        paystack_transaction = self.wallet_repo.create_paystack_transaction(
             user_id=user_id,
             reference=reference,
             amount=wallet_data.amount,
             transaction_type=TransactionType.ESCROW_DEPOSIT,
             payment_channel=wallet_data.channel,
         )
+
+        try:
+            data = await paystack_client.initialize_transaction(
+                email=user_email,
+                amount_kobo=to_kobo(wallet_data.amount),
+                reference=reference,
+                channels=[wallet_data.channel],
+                callback_url=settings.paystack_callback_url,
+            )
+        except PaystackError as err:
+            paystack_transaction.status = TransactionStatus.FAILED
+            paystack_transaction.failure_reason = err.message[:255]
+            self.wallet_repo.save_paystack_transaction(paystack_transaction)
+            raise
 
         logger.info(
             "wallet funding initialised",
@@ -306,11 +315,17 @@ class WalletService:
             reference=f"wd_{reference}",
             status=LedgerEntryStatus.PENDING,
             paystack_transaction_id=paystack_transaction.id,
-            description=f"Withdrawal to {account.bank_name} {account.account_number}",
+            # Only the last four digits are ever persisted outside the
+            # bank_account table; this description is returned verbatim by
+            # GET /transactions.
+            description=(
+                f"Withdrawal to {account.bank_name} "
+                f"****{account.account_number[-4:]}"
+            ),
             metadata={
                 "bank_account_id": account.id,
                 "bank_code": account.bank_code,
-                "account_number": account.account_number,
+                "account_last4": account.account_number[-4:],
             },
         )
 

@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.common.enums import DisputeCategory, DisputeResolutionOutcome, DisputeStatus
 from app.schemas.asset_schema import AssetFile, AssetResponse
@@ -18,16 +18,28 @@ class DisputeCreateRequest(BaseModel):
 
     category: DisputeCategory
     description: str = Field(min_length=20, max_length=2000)
-    files: list[AssetFile] = []
+    files: list[AssetFile] = Field(default_factory=list, max_length=10)
 
 
 class DisputeEvidenceCreateRequest(BaseModel):
-    files: list[AssetFile] = Field(min_length=1)
+    files: list[AssetFile] = Field(min_length=1, max_length=10)
 
 
 class DisputeResolveRequest(BaseModel):
     outcome: DisputeResolutionOutcome
     resolution_notes: str = Field(min_length=10, max_length=2000)
+
+    @field_validator("outcome")
+    @classmethod
+    def _supported_outcome(
+        cls, value: DisputeResolutionOutcome
+    ) -> DisputeResolutionOutcome:
+        if value == DisputeResolutionOutcome.SPLIT:
+            raise ValueError(
+                "Split outcomes are not supported yet; resolve as "
+                "favour_depositor or favour_beneficiary"
+            )
+        return value
 
 
 class DisputeResponse(BaseModel):

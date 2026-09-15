@@ -1,6 +1,3 @@
-# TODO: WORK ON PAYING FOR THE DOMAIN SO WE CAN MAKE USE OF EMAILS WITH RESEND
-
-
 import json
 from contextlib import asynccontextmanager
 
@@ -20,61 +17,84 @@ from app.core.response import error_response
 from app.exceptions import AppError
 from app.logging import get_logger, silence_third_party_loggers
 from app.rate_limiting import limiter
-from app.routers import bank_account, transaction, wallet
-from app.service.paystack_client import paystack_client
-
-from .routers import (
+from app.routers import (
     admin_dispute,
     agreement,
     asset,
     auth,
+    bank_account,
     condition,
-    dev,
     dispute,
+    invitation,
     notification,
     stats,
+    transaction,
     user,
+    wallet,
 )
-
-if settings.debug:
-    from .routers import dev
+from app.service.paystack_client import paystack_client
 
 logger = get_logger(__name__)
 
-
-# INFO: Logging setup
 silence_third_party_loggers()
+
+
+def init_integrations() -> None:
+    """Configure third-party SDKs. Idempotent, and never fatal on failure."""
+    if settings.sentry_dsn:
+        import sentry_sdk
+
+        sentry_sdk.init(
+            dsn=settings.sentry_dsn,
+            environment=settings.environment,
+            send_default_pii=False,
+            traces_sample_rate=0.1,
+        )
+
+    cloudinary.config(
+        cloud_name=settings.cloudinary_cloud_name,
+        api_key=settings.cloudinary_api_key,
+        api_secret=settings.cloudinary_secret_key,
+        secure=True,
+    )
+
+    raw_service_account = settings.firebase_service_account_json.strip()
+    if not firebase_admin._apps and raw_service_account not in {"", "{}"}:
+        try:
+            cert = credentials.Certificate(json.loads(raw_service_account))
+            firebase_admin.initialize_app(cert)
+            logger.info("Firebase Admin initialized")
+        except Exception:
+            logger.exception("Firebase Admin init failed — Firebase auth disabled")
+    elif not firebase_admin._apps:
+        logger.warning("FIREBASE_SERVICE_ACCOUNT_JSON unset — Firebase auth disabled")
+
+
+init_integrations()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting application...")
+    logger.info(
+        "Starting application", extra={"environment": settings.environment}
+    )
     yield
     await paystack_client.aclose()
-    logger.info("Application shutdown...")
+    logger.info("Application shutdown")
 
 
-cloudinary.config(
-    cloud_name=settings.cloudinary_cloud_name,
-    api_key=settings.cloudinary_api_key,
-    api_secret=settings.cloudinary_secret_key,
-    secure=True,
+# Interactive docs are a debug-only convenience. They enumerate every route
+# and, in older builds, wired the Authorize button to the dev login bypass.
+_docs_enabled = settings.debug and not settings.is_production
+
+app = FastAPI(
+    title="Adehun API",
+    version="1.0.0",
+    lifespan=lifespan,
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
 )
-origins = ["*"]
-
-
-# Firebase Admin SDK initialization
-if not firebase_admin._apps:
-    try:
-        credentials = credentials.Certificate(
-            json.loads(settings.firebase_service_account_json)
-        )
-        firebase_admin.initialize_app(credentials)
-        logger.info("Firebase Admin initialized")
-    except Exception:
-        logger.exception("Firebase Admin init failed — push notifications disabled")
-
-app = FastAPI(title="Adehun API", version="1.0.0", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(
     RateLimitExceeded,
@@ -118,7 +138,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 
 @app.exception_handler(AppError)
-async def value_error_exception_handler(request: Request, exc: AppError):
+async def app_error_handler(request: Request, exc: AppError):
     return error_response(
         code=exc.code, message=exc.message, status_code=exc.status_code
     )
@@ -126,9 +146,11 @@ async def value_error_exception_handler(request: Request, exc: AppError):
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    # The traceback is attached by logger.exception; never stringify the
+    # exception into the log record — driver errors embed connection URLs.
     logger.exception(
         "Unhandled exception",
-        extra={"meta": {"path": request.url.path, "error": str(exc)}},
+        extra={"meta": {"path": request.url.path, "type": type(exc).__name__}},
     )
     return error_response(
         code="INTERNAL_SERVER_ERROR",
@@ -137,13 +159,16 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# A wildcard origin combined with allow_credentials is an any-site CSRF grant.
+# Browser origins are opt-in via CORS_ORIGINS; the mobile app needs none.
+if settings.cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
+    )
 
 
 app.include_router(auth.router)
@@ -158,11 +183,21 @@ app.include_router(transaction.router)
 app.include_router(bank_account.router)
 app.include_router(dispute.router)
 app.include_router(admin_dispute.router)
+app.include_router(invitation.router)
 
-if settings.debug:
+if settings.debug and not settings.is_production:
+    # Imported lazily so the module (and its bypass routes) never load in prod.
+    from app.routers import dev
+
     app.include_router(dev.router)
+    logger.warning("dev router enabled — DEBUG=true")
 
 
-@app.get("/")
+@app.get("/", include_in_schema=False)
 def root():
-    return {"message": "Hello, World!"}
+    return {"status": "ok", "service": "adehun-api"}
+
+
+@app.get("/health", include_in_schema=False)
+def health():
+    return {"status": "ok"}

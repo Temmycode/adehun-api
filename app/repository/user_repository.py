@@ -2,7 +2,7 @@ from redis import Redis
 from sqlmodel import Session, select
 
 from app.logging import get_logger
-from app.models import Condition, Invitation, User
+from app.models import Invitation, User
 from app.redis import RedisClient
 from app.schemas.user_schema import UpdateUserRequest
 
@@ -47,25 +47,37 @@ class UserRepository(RedisClient):
         return user
 
     def register_user(self, user_id: str, phone_number: str, name: str) -> User | None:
-        user = self.get_by_id(user_id)
+        user = self.get_attached(user_id)
         if not user:
             return None
         user.phone_number = phone_number
         user.name = name
+        self.session.add(user)
         self.session.commit()
         self.session.refresh(user)
+        self._cache_delete(_user_key(user_id))
         return user
+
+    def get_attached(self, user_id: str) -> User | None:
+        """Always read from the DB; use this on every write path.
+
+        `get_by_id` may return a cached snapshot that is up to 15 minutes old.
+        Merging that back into the session and committing would overwrite
+        fresher columns (including `active` and `is_admin`) with stale values.
+        """
+        return self.session.get(User, user_id)
 
     def get_by_id(self, user_id: str) -> User | None:
         """
-        Fetch a user by PK.
-        Tries Redis first; falls back to DB and caches the result.
+        Fetch a user by PK for READ purposes.
+        Tries Redis first; falls back to DB and caches the result. The cached
+        object is detached — never mutate and commit it.
         """
         key = _user_key(user_id)
         cached = self._cache_get(key)
         if cached is not None:
             logger.debug("cache hit for user", extra={"user_id": user_id})
-            return self.session.merge(User.model_validate(cached))
+            return User.model_validate(cached)
 
         logger.debug("fetching user from db", extra={"user_id": user_id})
         db_user = self.session.exec(select(User).where(User.id == user_id)).first()
@@ -91,57 +103,41 @@ class UserRepository(RedisClient):
         ).all()
         return list(db_invitations)
 
-    def get_conditions_with_invitations(
-        self, invitations: list[str]
-    ) -> list[Condition]:
-        """
-        Fetch all conditions for a list of invitation IDs.
-        """
-        db_conditions = self.session.exec(
-            select(Condition).where(Condition.invitation_id.in_(invitations))  # pyright: ignore[reportAttributeAccessIssue, reportOptionalMemberAccess]
-        ).all()
-        return list(db_conditions)
-
-    def deactive_user(self, user_id: str) -> bool:
-        """
-        Deactives a users account
-        """
-        key = _user_key(user_id)
-        user = self.get_by_id(user_id)
-
+    def deactivate_user(self, user_id: str) -> bool:
+        """Deactivate a user's account."""
+        user = self.get_attached(user_id)
         if not user:
             return False
 
-        # Delete cache
-        self._cache_delete(key)
-
-        # Deactive user account
         user.active = 0
-        self.create_user(user)
+        self.session.add(user)
+        self.session.commit()
+        self._cache_delete(_user_key(user_id))
         return True
 
     def update_user(self, user_id: str, updated_user: UpdateUserRequest) -> User | None:
-        user = self.get_by_id(user_id)
-
+        """Apply the provided fields. A no-op update still returns the user."""
+        user = self.get_attached(user_id)
         if not user:
             return None
 
-        updated_fields = []
-
-        if updated_user.name:
+        changed = False
+        if updated_user.name is not None:
             user.name = updated_user.name
-            updated_fields.append("name")
+            changed = True
+        if updated_user.phone_number is not None:
+            user.phone_number = updated_user.phone_number
+            changed = True
+        if updated_user.profile_picture_url is not None:
+            user.profile_picture_url = updated_user.profile_picture_url
+            changed = True
 
-        if updated_user.profile_picture_url:
-            # user.profile_picture_url = updated_user.profile_picture_url
-            updated_fields.append("profile_picture_url")
-
-        if updated_fields:
+        if changed:
             self.session.add(user)
             self.session.commit()
-            return user
-
-        return None
+            self.session.refresh(user)
+            self._cache_delete(_user_key(user_id))
+        return user
 
     def rollback(self):
         self.session.rollback()

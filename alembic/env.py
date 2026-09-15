@@ -17,6 +17,7 @@ from app.models.idempotency_key import IdempotencyKey  # noqa: F401
 from app.models.invitation import Invitation  # noqa: F401
 from app.models.notification import Notification  # noqa: F401
 from app.models.paystack_transaction import PaystackTransaction  # noqa: F401
+from app.models.refresh_token import RefreshToken  # noqa: F401
 from app.models.transaction import Transaction  # noqa: F401
 from app.models.wallet import Wallet  # noqa: F401
 from app.models.webhook_event import WebhookEvent  # noqa: F401

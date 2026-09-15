@@ -1,16 +1,23 @@
-from app.logging import get_logger
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlmodel import select
 
-from app.service import token_service
+from app.config import settings
 from app.database import SessionDep
 from app.exceptions import BadRequestError, UserNotFoundError
+from app.logging import get_logger
 from app.models import User
+from app.service import token_service
 
 logger = get_logger(__name__)
+
+# Belt and braces: main.py only imports this module when DEBUG is on outside
+# production, and this guard makes an accidental import fatal rather than an
+# open door.
+if settings.is_production or not settings.debug:
+    raise RuntimeError("app.routers.dev must never be imported outside DEBUG mode")
 
 router = APIRouter(prefix="/auth", tags=["Development"])
 

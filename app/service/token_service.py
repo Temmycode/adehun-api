@@ -1,24 +1,39 @@
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
+from uuid import uuid4
 
 import jwt
 from fastapi import Depends, HTTPException, WebSocket
 from fastapi.security import OAuth2PasswordBearer
-
-from app.database import SessionDep
-from app.exceptions import AdminAccessRequiredError
-from app.models import User
+from sqlmodel import Session
 
 from app.config import settings
+from app.database import SessionDep
+from app.exceptions import AdminAccessRequiredError
 from app.logging import get_logger
+from app.models import User
 
 logger = get_logger(__name__)
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/dev-login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 SECRET_KEY = settings.secret_key
-ALGORITHM = settings.algorithm
+# Pinned in code. Reading the algorithm from the environment let a bad env
+# edit ("none", "RS256") turn every token into a forgery.
+ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRATION_MINUTES = settings.access_token_expiration_minutes
 REFRESH_TOKEN_EXPIRATION_DAYS = settings.refresh_token_expiration_days
+
+TokenType = Literal["access", "refresh"]
+
+_REQUIRED_CLAIMS = ["sub", "type", "exp", "iat", "jti"]
+
+
+def _credentials_exception() -> HTTPException:
+    return HTTPException(
+        status_code=401,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 # ------------------------------------------------------------------
@@ -26,33 +41,38 @@ REFRESH_TOKEN_EXPIRATION_DAYS = settings.refresh_token_expiration_days
 # ------------------------------------------------------------------
 
 
+def token_lifetime(token_type: TokenType) -> timedelta:
+    if token_type == "access":
+        return timedelta(minutes=ACCESS_TOKEN_EXPIRATION_MINUTES)
+    return timedelta(days=REFRESH_TOKEN_EXPIRATION_DAYS)
+
+
 def create_token(
     user_id: str,
-    token_type: Literal["access", "refresh"],
+    token_type: TokenType,
     expires_delta: timedelta | None = None,
     extra_claims: dict | None = None,
-):
-    expire_delta = (
-        timedelta(minutes=ACCESS_TOKEN_EXPIRATION_MINUTES)
-        if token_type == "access"
-        else timedelta(days=REFRESH_TOKEN_EXPIRATION_DAYS)
-    )
+    jti: str | None = None,
+) -> str:
+    """Mint a signed JWT.
 
-    expire = datetime.now(timezone.utc) + (
-        expires_delta if expires_delta else expire_delta
-    )
+    Every token carries `jti` (so refresh tokens can be individually revoked)
+    and `iat`. `jti` may be supplied so the caller can persist it first.
+    """
+    now = datetime.now(timezone.utc)
+    expire = now + (expires_delta or token_lifetime(token_type))
 
-    payload = {
+    payload: dict = {
         "sub": user_id,
         "type": token_type,
+        "iat": now,
         "exp": expire,
+        "jti": jti or uuid4().hex,
     }
-
     if extra_claims:
         payload.update(extra_claims)
 
-    encoded_jwt = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
 # ------------------------------------------------------------------
@@ -60,25 +80,30 @@ def create_token(
 # ------------------------------------------------------------------
 
 
-def verify_token(token: str, expected_type: Literal["access", "refresh"]):
-    # Verify the token and return the user information
-    credentials_exception = HTTPException(
-        status_code=401,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+def verify_token(token: str, expected_type: TokenType) -> dict:
+    """Validate signature, expiry, required claims and token type."""
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-
-        if payload.get("type") != expected_type:
-            raise credentials_exception
-
-        if payload.get("sub") is None:
-            raise credentials_exception
-
-        return payload
+        payload = jwt.decode(
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM],
+            options={"require": _REQUIRED_CLAIMS},
+        )
     except jwt.PyJWTError as exc:
-        raise credentials_exception from exc
+        raise _credentials_exception() from exc
+
+    if payload.get("type") != expected_type or not payload.get("sub"):
+        raise _credentials_exception()
+
+    return payload
+
+
+def _load_user(session: Session, user_id: str) -> User:
+    """Resolve the token subject; inactive accounts are rejected everywhere."""
+    user = session.get(User, user_id)
+    if not user or user.active == 0:
+        raise _credentials_exception()
+    return user
 
 
 # ------------------------------------------------------------------
@@ -90,55 +115,22 @@ def get_current_user(
     token: Annotated[str, Depends(oauth2_scheme)], session: SessionDep
 ) -> User:
     user_id = verify_token(token, "access")["sub"]
-
-    # Fetch user information from the database
-    user = session.get(User, user_id)
-    if not user:
-        raise HTTPException(
-            status_code=401,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    return user
+    return _load_user(session, user_id)
 
 
 def get_active_user(
     token: Annotated[str, Depends(oauth2_scheme)], session: SessionDep
 ) -> User:
     user_id = verify_token(token, "access")["sub"]
-
-    # Fetch user information from the database
-    user = session.get(User, user_id)
-    if not user:
-        raise HTTPException(
-            status_code=401,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    if user.active == 0:
-        raise HTTPException(
-            status_code=400,
-            detail="Inactive user",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    return user
+    return _load_user(session, user_id)
 
 
 def get_admin_user(current_user: Annotated[User, Depends(get_active_user)]) -> User:
-    """Platform staff only — the gate on every /admin route.
-
-    Layered on `get_active_user`, so an admin still has to be an authenticated,
-    active user. Raises AppError rather than HTTPException so the response
-    envelope matches the rest of the API; the HTTPExceptions above predate that
-    convention.
-    """
+    """Platform staff only — the gate on every /admin route."""
     if not current_user.is_admin:
         logger.warning(
             "non-admin attempted an admin route",
-            extra={"user_id": current_user.id, "email": current_user.email},
+            extra={"user_id": current_user.id},
         )
         raise AdminAccessRequiredError()
 
@@ -150,7 +142,8 @@ def get_admin_user(current_user: Annotated[User, Depends(get_active_user)]) -> U
 # -------------------------------------------------------------------
 
 
-def get_user_id_from_ws(websocket: WebSocket) -> str | None:
+def get_user_id_from_ws(websocket: WebSocket, session: Session) -> str | None:
+    """Authenticate a socket from `?token=`; returns None when it must close."""
     token = websocket.query_params.get("token")
     if not token:
         logger.info("WebSocket connection missing token")
@@ -158,9 +151,9 @@ def get_user_id_from_ws(websocket: WebSocket) -> str | None:
 
     try:
         payload = verify_token(token, expected_type="access")
-        user_id = payload["sub"]
-        logger.info("WebSocket authenticated", extra={"user_id": user_id})
-        return user_id
+        user = _load_user(session, payload["sub"])
+        logger.info("WebSocket authenticated", extra={"user_id": user.id})
+        return user.id
     except HTTPException:
         logger.warning("WebSocket token verification failed")
         return None

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 
 from app.common.enums import NotificationType
 from app.core.response import (
@@ -228,8 +228,8 @@ async def get_my_disputes(
     request: Request,
     current_user: ActiveUserDep,
     dispute_service: DisputeServiceDep,
-    skip: int = 0,
-    limit: int = 20,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
 ):
     """Every dispute the caller raised or is the respondent on."""
     return success_response(

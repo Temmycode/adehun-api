@@ -213,45 +213,47 @@ class AgreementService:
 
     def _invite_participant(
         self,
-        role: str,
+        role: ParticipantRole,
         creator_id: str,
+        creator_name: str,
         email: str,
-        is_email: bool,
         agreement: Agreement,
         background_tasks: BackgroundTasks,
     ) -> Invitation:
-
-        # invite the other participant via email/phone
+        """Create the invitation row and queue the email. Email only."""
+        invitee_role = (
+            ParticipantRole.BENEFICIARY
+            if role == ParticipantRole.DEPOSITOR
+            else ParticipantRole.DEPOSITOR
+        )
         invitation_token = get_invitation_token()
         invitation = self.agreement_repo.invite_participant(
             invitation_token,
             creator_id,
-            "beneficiary" if role == "depositor" else "depositor",
+            invitee_role.value,
             agreement,
             email,
         )
         invitation_data = InvitationResponse.model_validate(invitation)
 
-        if self.agreement_repo.redis_client:
-            store_invitation(
-                self.agreement_repo.redis_client,
-                invitation_token,
-                invitation_data.model_dump(mode="json"),
-            )
-        # NOTE: WEB_URL currently points at the API host, which has no /invite
-        # route — so these links 404. They are only correct once WEB_URL points
-        # at a deployed frontend that handles /invite?token=...
-        invitation_link = f"{settings.web_url}/invite?token={invitation_token}"
+        store_invitation(
+            self.agreement_repo.redis_client,
+            invitation_token,
+            invitation_data.model_dump(mode="json"),
+        )
+        # Served by GET /invite on this API; it deep-links into the app.
+        invitation_link = f"{settings.web_url.rstrip('/')}/invite?token={invitation_token}"
         background_tasks.add_task(
             email_service.send_invitation_email,
             email,
             invitation_link,
+            creator_name,
+            agreement.title,
         )
         logger.info(
             "participant invited",
             extra={
-                "email": email,
-                "role": role,
+                "role": invitee_role.value,
                 "agreement_id": agreement.id,
                 "creator_id": creator_id,
             },
@@ -263,7 +265,13 @@ class AgreementService:
         current_user_id: str,
         agreement_data: AgreementCreate,
         background_tasks: BackgroundTasks,
+        current_user_email: str = "",
+        current_user_name: str = "",
     ) -> AgreementCreateResponse:
+        invitee_email = agreement_data.invitee_email
+        if current_user_email and invitee_email == current_user_email.lower():
+            raise BadRequestError("You cannot invite yourself to an agreement")
+
         try:
             # create agreement
             agreement = self.agreement_repo.flush(
@@ -279,7 +287,7 @@ class AgreementService:
             creator = AgreementParticipant(
                 user_id=current_user_id,
                 agreement_id=agreement.id,
-                role=agreement_data.role,
+                role=agreement_data.role.value,
                 status=InvitationStatus.ACCEPTED.value,
             )
 
@@ -289,8 +297,8 @@ class AgreementService:
             invitation = self._invite_participant(
                 agreement_data.role,
                 creator.user_id,
-                agreement_data.other_participant_email_or_phone,
-                agreement_data.other_participant_email_or_phone.count("@") == 1,
+                current_user_name,
+                invitee_email,
                 agreement,
                 background_tasks,
             )
@@ -327,7 +335,7 @@ class AgreementService:
                 creator_check = AgreementParticipant(
                     user_id=current_user_id,
                     agreement_id=agreement.id,
-                    role=agreement_data.role,
+                    role=agreement_data.role.value,
                     status=InvitationStatus.ACCEPTED.value,
                 )
                 self.agreement_repo.session.add(creator_check)

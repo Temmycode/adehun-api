@@ -5,7 +5,7 @@ file level: every route here is gated by `AdminUserDep`, and the service methods
 they call are deliberately unscoped.
 """
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 
 from app.common.enums import DisputeCategory, DisputeStatus, NotificationType
 from app.core.response import (
@@ -56,8 +56,8 @@ async def list_disputes(
     dispute_service: DisputeServiceDep,
     status: DisputeStatus | None = None,
     category: DisputeCategory | None = None,
-    skip: int = 0,
-    limit: int = 20,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
 ):
     """The dispute queue, newest first. Filterable by status and category."""
     return success_response(

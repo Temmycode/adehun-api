@@ -25,8 +25,16 @@ class ForbiddenError(AppError):
 
 
 class WithdrawalNotAllowedError(AppError):
+    """Payouts are switched off (PAYSTACK_TRANSFERS_ENABLED=false).
+
+    Distinct code so the client can show "coming soon" rather than
+    "you do not have permission".
+    """
+
     def __init__(self, message: str = "Withdrawals are currently unavailable"):
-        super().__init__(message=message, code="FORBIDDEN", status_code=403)
+        super().__init__(
+            message=message, code="WITHDRAWALS_DISABLED", status_code=403
+        )
 
 
 class AdminAccessRequiredError(AppError):

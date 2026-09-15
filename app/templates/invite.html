@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Adehun invitation</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+           background: #f6f7fb; color: #111827; display: flex; min-height: 100vh; align-items: center; justify-content: center; }
+    @media (prefers-color-scheme: dark) { body { background: #0f172a; color: #e5e7eb; } .card { background: #1e293b; } }
+    .card { background: #fff; border-radius: 16px; padding: 32px 24px; max-width: 420px; width: calc(100% - 32px);
+            box-shadow: 0 10px 30px rgba(0,0,0,.08); text-align: center; }
+    h1 { font-size: 22px; margin: 0 0 8px; }
+    p { margin: 8px 0 20px; line-height: 1.5; }
+    .btn { display: block; padding: 14px 18px; border-radius: 12px; background: #2563eb; color: #fff;
+           text-decoration: none; font-weight: 600; margin-bottom: 12px; }
+    .btn.secondary { background: transparent; color: #2563eb; border: 1px solid #2563eb; }
+    .muted { font-size: 13px; opacity: .7; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    {% if live %}
+      <h1>{{ inviter_name }} invited you</h1>
+      <p>You have been invited to join <strong>{{ agreement_title }}</strong> on Adehun
+         as the <strong>{{ role }}</strong>.</p>
+      <a class="btn" id="open-app" href="{{ deep_link }}">Open in the Adehun app</a>
+      {% if ios_store_url %}<a class="btn secondary" href="{{ ios_store_url }}">Get it on the App Store</a>{% endif %}
+      {% if android_store_url %}<a class="btn secondary" href="{{ android_store_url }}">Get it on Google Play</a>{% endif %}
+      <p class="muted">If nothing happens, install the app and open this link again.</p>
+      <script>
+        (function () {
+          var ua = navigator.userAgent || "";
+          var link = document.getElementById("open-app");
+          if (/android/i.test(ua)) { link.setAttribute("href", {{ android_intent | tojson }}); }
+          // Try to open the app automatically; the button stays as a fallback.
+          setTimeout(function () { window.location.href = link.getAttribute("href"); }, 400);
+        })();
+      </script>
+    {% else %}
+      <h1>This invitation is no longer valid</h1>
+      <p>It may have expired or already been used. Ask the sender to invite you again.</p>
+      {% if ios_store_url %}<a class="btn secondary" href="{{ ios_store_url }}">Get the app on the App Store</a>{% endif %}
+      {% if android_store_url %}<a class="btn secondary" href="{{ android_store_url }}">Get the app on Google Play</a>{% endif %}
+    {% endif %}
+  </main>
+</body>
+</html>

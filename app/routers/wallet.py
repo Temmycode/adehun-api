@@ -6,6 +6,7 @@ from fastapi import APIRouter, Header, HTTPException, Request, WebSocket, status
 from fastapi.responses import JSONResponse
 
 from app.config import settings
+from app.database import SessionDep
 from app.core.response import (
     APIResponse,
     BadRequestResponse,
@@ -151,7 +152,9 @@ async def get_withdrawal(
 
 
 @router.websocket("/ws")
-async def wallet_websocket(websocket: WebSocket, wallet_service: WalletServiceDep):
+async def wallet_websocket(
+    websocket: WebSocket, wallet_service: WalletServiceDep, session: SessionDep
+):
     """Live wallet balance for the authenticated user.
 
     Auth is `?token=<access_token>`. Pushes a WALLET_STATE frame on connect and
@@ -159,7 +162,7 @@ async def wallet_websocket(websocket: WebSocket, wallet_service: WalletServiceDe
     not fan out across workers — `GET /wallet` is the fallback and the source of
     truth. Frame shapes: docs/websockets.md.
     """
-    user_id = get_user_id_from_ws(websocket)
+    user_id = get_user_id_from_ws(websocket, session)
     if not user_id:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
@@ -169,8 +172,12 @@ async def wallet_websocket(websocket: WebSocket, wallet_service: WalletServiceDe
 
     try:
         while True:
-            await websocket.receive_text()
+            # Clients send nothing meaningful; receive() accepts text or binary
+            # so a stray binary frame does not kill the socket.
+            await websocket.receive()
     except Exception:
+        pass
+    finally:
         ws_manager.disconnect(user_id, websocket)
 
 
@@ -182,18 +189,15 @@ async def wallet_websocket(websocket: WebSocket, wallet_service: WalletServiceDe
 def _verify_paystack_signature(raw_body: bytes, provided: str | None) -> bool:
     """Constant-time HMAC-SHA512 check over the exact bytes received.
 
-    Both the test and live secrets are tried so the two environments can share
-    an endpoint.
+    Only the ACTIVE key is accepted. Accepting the test key in live mode would
+    let anyone holding the (widely shared) test secret forge a charge.success
+    and mint real balance.
     """
     if not provided:
         return False
-    for secret in settings.paystack_webhook_secrets:
-        computed = hmac.new(
-            secret.encode("utf-8"), raw_body, hashlib.sha512
-        ).hexdigest()
-        if hmac.compare_digest(computed, provided):
-            return True
-    return False
+    secret = settings.paystack_webhook_secret
+    computed = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha512).hexdigest()
+    return hmac.compare_digest(computed, provided)
 
 
 @router.post("/webhook/paystack", include_in_schema=False)

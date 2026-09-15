@@ -31,8 +31,21 @@ from app.logging import get_logger
 from app.models.paystack_transaction import TransactionStatus
 from app.repository.wallet_repository import WalletRepository
 from app.repository.webhook_event_repository import WebhookEventRepository
+from app.service.paystack_client import PaystackClient, PaystackError
 
 logger = get_logger(__name__)
+
+SUPPORTED_CURRENCY = "NGN"
+
+
+def _wallet_balances(wallet) -> dict[str, Any]:
+    if wallet is None:
+        return {"available_balance": None, "escrow_balance": None, "total_balance": None}
+    return {
+        "available_balance": float(wallet.available_balance),
+        "escrow_balance": float(wallet.escrow_balance),
+        "total_balance": float(wallet.available_balance + wallet.escrow_balance),
+    }
 
 
 @dataclass
@@ -87,9 +100,11 @@ class PaystackWebhookService:
         self,
         wallet_repo: WalletRepository,
         webhook_repo: WebhookEventRepository,
+        paystack: PaystackClient,
     ):
         self.wallet_repo = wallet_repo
         self.webhook_repo = webhook_repo
+        self.paystack = paystack
 
     async def handle(self, payload: dict, raw_body: bytes) -> WebhookOutcome:
         event_type = str(payload.get("event") or "")
@@ -161,10 +176,36 @@ class PaystackWebhookService:
         if paystack_transaction.status != TransactionStatus.PENDING:
             return WebhookOutcome(200, "already_processed", "charge.success")
 
-        paid_kobo = data.get("amount")
+        # Never credit on the webhook body alone. A signature proves the bytes
+        # came from someone holding the secret; the verify call proves Paystack
+        # actually settled this reference, in this currency, for this amount.
+        try:
+            verified = await self.paystack.verify_transaction(reference)
+        except PaystackError as err:
+            logger.warning(
+                "could not verify charge with paystack; will retry",
+                extra={"reference": reference, "code": err.code},
+            )
+            return WebhookOutcome(500, "verify_failed", "charge.success")
+
+        if str(verified.get("status") or "").lower() != "success":
+            logger.warning(
+                "charge.success received but verify says not successful",
+                extra={"reference": reference, "status": verified.get("status")},
+            )
+            return WebhookOutcome(200, "not_verified", "charge.success")
+
+        currency = str(verified.get("currency") or data.get("currency") or "")
+        if currency.upper() != SUPPORTED_CURRENCY:
+            logger.error(
+                "charge in unsupported currency", extra={"reference": reference}
+            )
+            return WebhookOutcome(200, "unsupported_currency", "charge.success")
+
+        paid_kobo = verified.get("amount")
         if paid_kobo is None:
             logger.error(
-                "charge.success carried no amount", extra={"reference": reference}
+                "verified charge carried no amount", extra={"reference": reference}
             )
             return WebhookOutcome(200, "malformed", "charge.success")
 
@@ -265,6 +306,17 @@ class PaystackWebhookService:
         if paystack_transaction.status != TransactionStatus.PENDING:
             return WebhookOutcome(200, "already_processed", "transfer.success")
 
+        try:
+            verified = await self.paystack.verify_transfer(reference)
+        except PaystackError as err:
+            logger.warning(
+                "could not verify transfer with paystack; will retry",
+                extra={"reference": reference, "code": err.code},
+            )
+            return WebhookOutcome(500, "verify_failed", "transfer.success")
+        if str(verified.get("status") or "").lower() != "success":
+            return WebhookOutcome(200, "not_verified", "transfer.success")
+
         paystack_transaction.status = TransactionStatus.SUCCESS
         paystack_transaction.paystack_id = data.get("id")
         paystack_transaction.transfer_code = data.get("transfer_code")
@@ -303,9 +355,7 @@ class PaystackWebhookService:
                         "type": "WITHDRAWAL_COMPLETED",
                         "reference": reference,
                         "amount": float(paystack_transaction.amount),
-                        "available_balance": float(wallet.available_balance)
-                        if wallet
-                        else None,
+                        **_wallet_balances(wallet),
                     },
                 )
             ],
@@ -410,9 +460,7 @@ class PaystackWebhookService:
                         "type": "WITHDRAWAL_FAILED",
                         "reference": reference,
                         "amount": float(original.amount),
-                        "available_balance": float(
-                            result.wallet.available_balance
-                        ),
+                        **_wallet_balances(result.wallet),
                     },
                 )
             ],

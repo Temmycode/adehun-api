@@ -13,6 +13,7 @@ from app.repository.condition_repository import ConditionRepository
 from app.repository.dispute_repository import DisputeRepository
 from app.repository.idempotency_repository import IdempotencyRepository
 from app.repository.notification_repository import NotificationRepository
+from app.repository.refresh_token_repository import RefreshTokenRepository
 from app.repository.stats_repository import StatsRepository
 from app.repository.transaction_repository import TransactionRepository
 from app.repository.user_repository import UserRepository
@@ -90,11 +91,21 @@ NotificationServiceDep = Annotated[
 ]
 
 
+def get_refresh_token_repository(session: SessionDep) -> RefreshTokenRepository:
+    return RefreshTokenRepository(session)
+
+
+RefreshTokenRepositoryDep = Annotated[
+    RefreshTokenRepository, Depends(get_refresh_token_repository)
+]
+
+
 def get_auth_service(
     user_repo: UserRepositoryDep,
+    refresh_token_repo: RefreshTokenRepositoryDep,
     notification_service: NotificationServiceDep,
 ) -> AuthService:
-    return AuthService(user_repo, notification_service)
+    return AuthService(user_repo, refresh_token_repo, notification_service)
 
 
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
@@ -219,7 +230,9 @@ WebhookEventRepositoryDep = Annotated[
 def get_paystack_webhook_service(
     wallet_repo: WalletRepositoryDep, webhook_repo: WebhookEventRepositoryDep
 ) -> PaystackWebhookService:
-    return PaystackWebhookService(wallet_repo, webhook_repo)
+    from app.service.paystack_client import paystack_client
+
+    return PaystackWebhookService(wallet_repo, webhook_repo, paystack_client)
 
 
 PaystackWebhookServiceDep = Annotated[

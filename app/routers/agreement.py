@@ -1,6 +1,7 @@
 from fastapi import APIRouter, BackgroundTasks, Request, WebSocket, status
 
 from app.common.enums import NotificationType
+from app.core.authz import require_read_access
 from app.core.response import (
     APIResponse,
     BadRequestResponse,
@@ -11,20 +12,22 @@ from app.core.response import (
     UnauthorizedResponse,
     success_response,
 )
+from app.database import SessionDep
 from app.dependencies import (
     ActiveUserDep,
     AdminUserDep,
     AgreementServiceDep,
     ConditionServiceDep,
     IdempotencyDep,
-    RequiredIdempotencyDep,
     NotificationServiceDep,
+    RequiredIdempotencyDep,
     TransactionServiceDep,
     UserRepositoryDep,
     WalletServiceDep,
 )
 from app.exceptions import BadRequestError
 from app.logging import get_logger
+from app.models import User
 from app.rate_limiting import limiter
 from app.realtime.manager import ws_manager
 from app.schemas.agreement_schema import (
@@ -132,6 +135,7 @@ async def broadcast_agreement_update(
 async def agreement_websocket(
     websocket: WebSocket,
     agreement_service: AgreementServiceDep,
+    session: SessionDep,
 ):
     """Agreement and dispute events for the authenticated user.
 
@@ -139,10 +143,12 @@ async def agreement_websocket(
     Authorization header. Frame shapes are documented in docs/websockets.md;
     FastAPI does not emit WebSocket routes into openapi.json.
     """
-    user_id = get_user_id_from_ws(websocket)
+    user_id = get_user_id_from_ws(websocket, session)
     if not user_id:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
+    user = session.get(User, user_id)
+    user_email = user.email if user else ""
 
     await ws_manager.connect(user_id, websocket)
     await websocket.send_json(
@@ -163,7 +169,8 @@ async def agreement_websocket(
                     )
                     continue
                 try:
-                    agreement = agreement_service.get_agreement(agreement_id)
+                    require_read_access(session, agreement_id, user_id, user_email)
+                    agreement = agreement_service.get_agreement(agreement_id, user_id)
                     await websocket.send_json(
                         {
                             "type": "agreement",
@@ -224,6 +231,8 @@ async def create_agreement(
         current_user.id,
         agreement_data,
         background_tasks,
+        current_user_email=current_user.email,
+        current_user_name=current_user.name,
     )
 
     invited = user_repository.get_by_email(
@@ -426,15 +435,16 @@ async def reject_agreement(
 @limiter.limit("10/minute")
 async def get_agreement(
     request: Request,
-    _: ActiveUserDep,
+    current_user: ActiveUserDep,
     agreement_service: AgreementServiceDep,
+    session: SessionDep,
     agreement_id: str,
 ):
-    """
-    Get an agreement by its ID.
-    """
-
-    return success_response(data=agreement_service.get_agreement(agreement_id))
+    """Get an agreement. Participants and pending invitees only."""
+    require_read_access(session, agreement_id, current_user.id, current_user.email)
+    return success_response(
+        data=agreement_service.get_agreement(agreement_id, current_user.id)
+    )
 
 
 @router.get(

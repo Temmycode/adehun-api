@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.schemas.invitation_schema import ConditionInvitationResponse
 
@@ -8,9 +8,19 @@ from ..schemas.participant_schema import ParticipantResponse
 
 
 class ConditionCreate(BaseModel):
-    title: str
-    description: str
+    title: str = Field(min_length=1, max_length=120)
+    description: str = Field(min_length=1, max_length=2000)
     required_from_email: EmailStr
+
+    @field_validator("title", "description")
+    @classmethod
+    def _strip(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("required_from_email", mode="after")
+    @classmethod
+    def _lower(cls, value: str) -> str:
+        return value.lower()
 
 
 class ConditionResponse(BaseModel):
@@ -35,4 +45,4 @@ class BatchConditionResponse(ConditionResponse):
 
 
 class ConditionReject(BaseModel):
-    rejected_reason: str
+    rejected_reason: str = Field(min_length=3, max_length=1000)
