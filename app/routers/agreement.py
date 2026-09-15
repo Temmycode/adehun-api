@@ -756,6 +756,48 @@ async def refund_agreement_escrow(
             "This agreement's escrow has already been released to the beneficiary"
         )
 
+    context, result = perform_escrow_refund(
+        agreement_id, agreement_service, wallet_service, notification_service
+    )
+
+    await broadcast_agreement_update(agreement_service, agreement_id, event="refunded")
+
+    logger.warning(
+        "escrow refunded by admin",
+        extra={
+            "agreement_id": agreement_id,
+            "admin_user_id": current_user.id,
+            "amount": str(context.amount),
+        },
+    )
+
+    idem.bind_reference(result.entry.reference)
+    return idem.complete(
+        success_response(
+            data=EscrowMovementResponse(
+                agreement_id=agreement_id,
+                amount=context.amount,
+                reference=result.entry.reference,
+                available_balance=result.wallet.available_balance,
+                escrow_balance=result.wallet.escrow_balance,
+                replayed=result.replayed,
+            )
+        )
+    )
+
+
+def perform_escrow_refund(
+    agreement_id: str,
+    agreement_service,
+    wallet_service,
+    notification_service,
+):
+    """Return escrow to the depositor and tell both parties.
+
+    Shared by the admin `/refund` endpoint and the dispute-resolution route so
+    a `favour_depositor` outcome pays out through exactly the same code.
+    Idempotent on `esc_ref_{agreement_id}`.
+    """
     # Flushes status = refunded, committed atomically with the ledger entry.
     context = agreement_service.prepare_refund(agreement_id)
 
@@ -785,10 +827,7 @@ async def refund_agreement_escrow(
                 type=NotificationType.ESCROW_REFUNDED,
                 title="Escrow Refunded",
                 message=message,
-                metadata={
-                    "agreement_id": agreement_id,
-                    "amount": str(context.amount),
-                },
+                metadata={"agreement_id": agreement_id, "amount": str(context.amount)},
             )
         except Exception:
             logger.exception(
@@ -796,32 +835,7 @@ async def refund_agreement_escrow(
                 extra={"agreement_id": agreement_id, "recipient_id": user_id},
             )
 
-    agreement_payload = agreement_service.get_agreement(agreement_id)
-    for uid in (context.depositor_user_id, context.beneficiary_user_id):
-        await _send_agreement_ws_payload(uid, agreement_payload, event="refunded")
-
-    logger.warning(
-        "escrow refunded by admin",
-        extra={
-            "agreement_id": agreement_id,
-            "admin_user_id": current_user.id,
-            "amount": str(context.amount),
-        },
-    )
-
-    idem.bind_reference(result.entry.reference)
-    return idem.complete(
-        success_response(
-            data=EscrowMovementResponse(
-                agreement_id=agreement_id,
-                amount=context.amount,
-                reference=result.entry.reference,
-                available_balance=result.wallet.available_balance,
-                escrow_balance=result.wallet.escrow_balance,
-                replayed=result.replayed,
-            )
-        )
-    )
+    return context, result
 
 
 def perform_escrow_release(
@@ -846,7 +860,7 @@ def perform_escrow_release(
     )
 
     # Without this, get_by_id serves a stale `status` from Redis for 5 minutes.
-    agreement_service.mark_agreement_completed_cache(agreement_id)
+    agreement_service.invalidate_agreement_cache(agreement_id)
 
     for user_id, message in (
         (

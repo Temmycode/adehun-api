@@ -53,14 +53,39 @@ Exactly one frame, pushed immediately:
 
 ### Pushed later
 
-The same `WALLET_STATE` frame is re-pushed when a Paystack webhook credits the
-wallet. Balances are floats here, unlike the REST API, which returns them as
-decimal strings.
+Webhook-driven frames. Every one carries the three balances so a client can
+replace its wallet state wholesale; `amount` is the size of the movement.
+Balances are floats here, unlike the REST API, which returns decimal strings.
+
+```jsonc
+// A Paystack charge was verified and credited.
+{ "type": "WALLET_CREDITED", "amount": 5000.0,
+  "available_balance": 17500.0, "escrow_balance": 400000.0, "total_balance": 417500.0 }
+
+// A withdrawal transfer settled at the bank. No balance change (the debit
+// happened at request time), but the balances are included for convenience.
+{ "type": "WITHDRAWAL_COMPLETED", "reference": "WD-…", "amount": 5000.0,
+  "available_balance": 12500.0, "escrow_balance": 400000.0, "total_balance": 412500.0 }
+
+// A withdrawal failed or was reversed and the money is back in the wallet.
+{ "type": "WITHDRAWAL_FAILED", "reference": "WD-…", "amount": 5000.0,
+  "available_balance": 17500.0, "escrow_balance": 400000.0, "total_balance": 417500.0 }
+```
+
+Switch on `type`. Treat unknown types as "refetch `GET /wallet`". Balance
+fields can be `null` in the rare case the wallet row could not be loaded;
+clients must not coerce `null` to `0`.
 
 ### Inbound
 
-None. The server reads and discards; the read loop exists only to detect
-disconnects.
+None. The server reads and discards (text or binary); the read loop exists only
+to detect disconnects.
+
+### Reconnecting
+
+Sockets drop on backgrounding, network changes and server restarts, and a
+dropped socket receives nothing. Clients must reconnect with backoff and, on
+every (re)connect and on app resume, refetch `GET /wallet`.
 
 ### HTTP fallback — **this exists, use it**
 
@@ -93,6 +118,10 @@ Replies with an `agreement` frame (no `event` key), or:
 { "type": "error", "message": "Unsupported websocket event type" }
 ```
 
+`get_agreement` is subject to the same authorization as `GET /agreements/{id}`:
+only participants and pending invitees get the agreement; anyone else gets the
+"Unable to fetch agreement" error frame.
+
 ### Pushed: agreement state changed
 
 **Yes — this socket does push agreement updates.** A client listener for it is
@@ -114,7 +143,7 @@ not dead code.
 
 | `event` | Trigger |
 |---|---|
-| `created` | `POST /agreements` — sent to the creator and the invitee |
+| `created` | `POST /agreements` — sent to the invitee if they already have an account |
 | `updated` | `POST /agreements/{id}/accept`, `.../reject`, `.../fund` |
 | `released` | Escrow released — both the manual `/release` and the automatic release on final condition approval |
 | `cancelled` | `POST /agreements/{id}/cancel` |

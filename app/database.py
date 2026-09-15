@@ -11,11 +11,23 @@ logger = get_logger(__name__)
 
 
 def build_database_url() -> str:
-    """Compose the Postgres URL, escaping credentials that contain URL chars."""
+    """Compose the Postgres URL, escaping credentials that contain URL chars.
+
+    A hostname starting with "/" is a Unix socket directory (local Homebrew
+    Postgres), which libpq wants as `?host=` rather than in the authority.
+    """
+    credentials = (
+        f"{quote_plus(settings.database_username)}:"
+        f"{quote_plus(settings.database_password)}"
+    )
+    host = settings.database_hostname
+    if host.startswith("/"):
+        return (
+            f"postgresql://{credentials}@/{settings.database_name}"
+            f"?host={quote_plus(host)}&port={settings.database_port}"
+        )
     return (
-        f"postgresql://{quote_plus(settings.database_username)}:"
-        f"{quote_plus(settings.database_password)}@"
-        f"{settings.database_hostname}:{settings.database_port}/"
+        f"postgresql://{credentials}@{host}:{settings.database_port}/"
         f"{settings.database_name}"
     )
 

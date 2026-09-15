@@ -12,8 +12,8 @@ if TYPE_CHECKING:
 
 class Invitation(SQLModel, table=True):
     id: str = Field(primary_key=True, default_factory=lambda: str(uuid4()))
-    email: str
-    token: str
+    email: str = Field(index=True)
+    token: str = Field(unique=True, index=True)
     agreement_id: str = Field(foreign_key="agreement.id")
     role: str
     invited_by: str = Field(foreign_key="user.id")
