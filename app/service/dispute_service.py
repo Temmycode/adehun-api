@@ -322,9 +322,7 @@ class DisputeService:
         if dispute is None:
             raise DisputeNotFoundError()
         if dispute.status != DisputeStatus.OPEN:
-            raise DisputeNotOpenError(
-                f"This dispute is already {dispute.status}"
-            )
+            raise DisputeNotOpenError(f"This dispute is already {dispute.status}")
 
         dispute.status = DisputeStatus.UNDER_REVIEW
         dispute.updated_at = datetime.now(timezone.utc)
