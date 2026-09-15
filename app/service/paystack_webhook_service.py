@@ -152,7 +152,12 @@ class PaystackWebhookService:
             )
             return WebhookOutcome(500, "error", event_type)
 
-        self.webhook_repo.mark(dedupe_key, WebhookEventStatus.PROCESSED)
+        if outcome.http_status >= 500:
+            # We are asking the provider to redeliver; leave the event
+            # re-claimable (bounded by MAX_ATTEMPTS).
+            self.webhook_repo.mark_failed(dedupe_key, outcome.status)
+        else:
+            self.webhook_repo.mark(dedupe_key, WebhookEventStatus.PROCESSED)
         return outcome
 
     # ------------------------------------------------------------------ #

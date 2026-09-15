@@ -133,7 +133,7 @@ class DisputeService:
         `adehun/disputes` folder instead of `adehun/assets`.
         """
         self._require_participant(agreement_id, user_id)
-        return create_upload_signature("disputes")
+        return create_upload_signature(f"disputes/{agreement_id}")
 
     def raise_dispute(
         self, agreement_id: str, user_id: str, data: DisputeCreateRequest
