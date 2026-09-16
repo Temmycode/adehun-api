@@ -1,7 +1,8 @@
-from app.logging import get_logger
-
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from starlette.requests import Request
+
+from app.logging import get_logger
 
 from .config import settings
 
@@ -15,32 +16,46 @@ MEMORY_URL = "memory://"
 
 
 def _resolve_storage_uri() -> str:
+    """Use Redis when reachable so limits are shared across workers.
+
+    In-memory storage is per process: with N uvicorn workers every limit is
+    silently N times more generous and resets on deploy. Falling back keeps
+    the app bootable when Redis is down, but that is logged loudly.
     """
-    Try to reach Redis. If it is reachable, use it as the rate-limit
-    storage backend. Otherwise fall back to an in-process memory store so
-    that the application can still start and serve requests without Redis.
-    """
+    if settings.environment == "test":
+        return MEMORY_URL
     try:
-        # Import here so a missing extras install doesn't break the module.
         from limits.storage import RedisStorage
 
         storage = RedisStorage(REDIS_URL)
-        # check() sends a PING and raises if the server is unreachable.
         storage.check()
-        logger.info("rate limiter connected to redis", extra={"storage": "redis"})
+        logger.info("rate limiter connected to redis")
         return REDIS_URL
     except Exception:
         logger.warning(
-            "rate limiter falling back to in-memory storage",
-            extra={"storage": "memory", "reason": "redis unreachable"},
+            "rate limiter falling back to in-memory storage; limits are per worker"
         )
         return MEMORY_URL
 
 
+def client_ip(request: Request) -> str:
+    """Rate-limit key.
+
+    Behind a reverse proxy the socket peer is the proxy, so every user would
+    share one bucket. Only trust X-Forwarded-For when configured to, and then
+    only its first hop (the client), never a value the client can append.
+    """
+    if settings.trust_proxy_headers:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+    return get_remote_address(request)
+
+
 limiter = Limiter(
-    key_func=get_remote_address,
-    # storage_uri=_resolve_storage_uri(),
-    # # If Redis goes down *after* startup, swallow the storage error and let
-    # # the request through rather than returning a 500 to the caller.
+    key_func=client_ip,
+    storage_uri=_resolve_storage_uri(),
+    # If Redis goes down after startup, let the request through rather than
+    # returning a 500 to the caller.
     swallow_errors=True,
 )

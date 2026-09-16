@@ -213,45 +213,47 @@ class AgreementService:
 
     def _invite_participant(
         self,
-        role: str,
+        role: ParticipantRole,
         creator_id: str,
+        creator_name: str,
         email: str,
-        is_email: bool,
         agreement: Agreement,
         background_tasks: BackgroundTasks,
     ) -> Invitation:
-
-        # invite the other participant via email/phone
+        """Create the invitation row and queue the email. Email only."""
+        invitee_role = (
+            ParticipantRole.BENEFICIARY
+            if role == ParticipantRole.DEPOSITOR
+            else ParticipantRole.DEPOSITOR
+        )
         invitation_token = get_invitation_token()
         invitation = self.agreement_repo.invite_participant(
             invitation_token,
             creator_id,
-            "beneficiary" if role == "depositor" else "depositor",
+            invitee_role.value,
             agreement,
             email,
         )
         invitation_data = InvitationResponse.model_validate(invitation)
 
-        if self.agreement_repo.redis_client:
-            store_invitation(
-                self.agreement_repo.redis_client,
-                invitation_token,
-                invitation_data.model_dump(mode="json"),
-            )
-        # NOTE: WEB_URL currently points at the API host, which has no /invite
-        # route — so these links 404. They are only correct once WEB_URL points
-        # at a deployed frontend that handles /invite?token=...
-        invitation_link = f"{settings.web_url}/invite?token={invitation_token}"
+        store_invitation(
+            self.agreement_repo.redis_client,
+            invitation_token,
+            invitation_data.model_dump(mode="json"),
+        )
+        # Served by GET /invite on this API; it deep-links into the app.
+        invitation_link = f"{settings.web_url.rstrip('/')}/invite?token={invitation_token}"
         background_tasks.add_task(
             email_service.send_invitation_email,
             email,
             invitation_link,
+            creator_name,
+            agreement.title,
         )
         logger.info(
             "participant invited",
             extra={
-                "email": email,
-                "role": role,
+                "role": invitee_role.value,
                 "agreement_id": agreement.id,
                 "creator_id": creator_id,
             },
@@ -263,7 +265,13 @@ class AgreementService:
         current_user_id: str,
         agreement_data: AgreementCreate,
         background_tasks: BackgroundTasks,
+        current_user_email: str = "",
+        current_user_name: str = "",
     ) -> AgreementCreateResponse:
+        invitee_email = agreement_data.invitee_email
+        if current_user_email and invitee_email == current_user_email.lower():
+            raise BadRequestError("You cannot invite yourself to an agreement")
+
         try:
             # create agreement
             agreement = self.agreement_repo.flush(
@@ -279,7 +287,7 @@ class AgreementService:
             creator = AgreementParticipant(
                 user_id=current_user_id,
                 agreement_id=agreement.id,
-                role=agreement_data.role,
+                role=agreement_data.role.value,
                 status=InvitationStatus.ACCEPTED.value,
             )
 
@@ -289,8 +297,8 @@ class AgreementService:
             invitation = self._invite_participant(
                 agreement_data.role,
                 creator.user_id,
-                agreement_data.other_participant_email_or_phone,
-                agreement_data.other_participant_email_or_phone.count("@") == 1,
+                current_user_name,
+                invitee_email,
                 agreement,
                 background_tasks,
             )
@@ -327,7 +335,7 @@ class AgreementService:
                 creator_check = AgreementParticipant(
                     user_id=current_user_id,
                     agreement_id=agreement.id,
-                    role=agreement_data.role,
+                    role=agreement_data.role.value,
                     status=InvitationStatus.ACCEPTED.value,
                 )
                 self.agreement_repo.session.add(creator_check)
@@ -362,16 +370,17 @@ class AgreementService:
         if db_agreement is None:
             raise AgreementNotFoundError()
 
-        response = self._to_agreement_response(db_agreement, 0, 0, user_id)
-        return response
+        total, met = self.agreement_repo.get_condition_counts(agreement_id)
+        funded = self.agreement_repo.is_funded(agreement_id)
+        return self._to_agreement_response(db_agreement, total, met, user_id, funded)
 
     def get_all_user_agreements(self, user_id: str) -> list[AgreementResponse]:
         """Get all agreements for a user."""
 
         db_agreements = self.agreement_repo.get_user_agreements(user_id)
         return [
-            self._to_agreement_response(agr, con_ct, met_ct, user_id)
-            for agr, con_ct, met_ct in db_agreements
+            self._to_agreement_response(agr, con_ct, met_ct, user_id, funded)
+            for agr, con_ct, met_ct, funded in db_agreements
         ]
 
     def get_agreement_invitation(
@@ -401,6 +410,7 @@ class AgreementService:
         condition_count: int,
         conditions_met_count: int,
         user_id: str | None = None,
+        is_funded: bool = False,
     ) -> AgreementResponse:
         """Map an Agreement (with loaded participants) to AgreementResponse."""
         depositor: AgreementParticipant | None = None
@@ -426,6 +436,7 @@ class AgreementService:
             created_at=agreement.created_at,
             condition_count=condition_count,
             conditions_met_count=conditions_met_count,
+            is_funded=is_funded,
         )
         if user_id is not None:
             participant = self.agreement_repo.get_participant_for_user(
@@ -457,6 +468,19 @@ class AgreementService:
             and participant.status == InvitationStatus.ACCEPTED.value
         ):
             return self.get_agreement(agreement_id, user_id)
+
+        # Acceptance only ever moves PENDING -> ACTIVE. Without this guard a
+        # still-live invitation could flip a cancelled, completed or refunded
+        # agreement back to active and let it be funded and released again.
+        existing = self.agreement_repo.get_attached(agreement_id)
+        if existing is None:
+            raise AgreementNotFoundError()
+        if existing.status != AgreementStatus.PENDING:
+            raise BadRequestError(
+                f"An agreement that is {existing.status} can no longer be accepted"
+            )
+        if (invitation.status or "pending") != "pending":
+            raise BadRequestError("This invitation is no longer valid")
 
         if participant is None:
             participant = AgreementParticipant(
@@ -556,13 +580,19 @@ class AgreementService:
     ) -> AgreementResponse:
         """Reject an agreement and mark the participant as rejected."""
 
-        # This method cancels the agreement unconditionally further down, which
-        # would otherwise let a party under dispute cancel their way out of the
-        # freeze. Checked before any state is written.
-        existing = self.agreement_repo.get_by_id(agreement_id)
-        if existing is not None and existing.status == AgreementStatus.DISPUTED:
+        # Declining an invitation cancels the agreement, so it is only allowed
+        # while the deal is still forming. A completed, refunded, cancelled or
+        # disputed agreement must not be flipped by a late "decline".
+        existing = self.agreement_repo.get_attached(agreement_id)
+        if existing is None:
+            raise AgreementNotFoundError()
+        if existing.status == AgreementStatus.DISPUTED:
             raise BadRequestError(
                 "This agreement is under dispute and cannot be cancelled"
+            )
+        if existing.status not in {AgreementStatus.PENDING, AgreementStatus.ACTIVE}:
+            raise BadRequestError(
+                f"An agreement that is {existing.status} can no longer be declined"
             )
 
         invitation = self.agreement_repo.get_invitation_by_agreement_id(
@@ -613,5 +643,3 @@ class AgreementService:
         )
 
         return self.get_agreement(agreement_id, user_id)
-
-    # def get_invitation  inv

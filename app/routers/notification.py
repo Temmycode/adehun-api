@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 
 from app.core.response import (
     APIResponse,
@@ -34,8 +34,8 @@ async def get_notifications(
     request: Request,
     current_user: ActiveUserDep,
     notification_service: NotificationServiceDep,
-    skip: int = 0,
-    limit: int = 20,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
 ):
     """Get paginated notifications for the authenticated user."""
     return success_response(

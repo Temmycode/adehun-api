@@ -9,6 +9,7 @@ from .idempotency_key import IdempotencyKey
 from .invitation import Invitation
 from .notification import Notification
 from .paystack_transaction import PaystackTransaction
+from .refresh_token import RefreshToken
 from .transaction import Transaction
 from .user import User
 from .wallet import Wallet
@@ -26,6 +27,7 @@ __all__ = [
     "Invitation",
     "Notification",
     "PaystackTransaction",
+    "RefreshToken",
     "Transaction",
     "User",
     "Wallet",

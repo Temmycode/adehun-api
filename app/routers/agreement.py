@@ -1,6 +1,7 @@
 from fastapi import APIRouter, BackgroundTasks, Request, WebSocket, status
 
 from app.common.enums import NotificationType
+from app.core.authz import require_read_access
 from app.core.response import (
     APIResponse,
     BadRequestResponse,
@@ -11,20 +12,22 @@ from app.core.response import (
     UnauthorizedResponse,
     success_response,
 )
+from app.database import SessionDep
 from app.dependencies import (
     ActiveUserDep,
     AdminUserDep,
     AgreementServiceDep,
     ConditionServiceDep,
     IdempotencyDep,
-    RequiredIdempotencyDep,
     NotificationServiceDep,
+    RequiredIdempotencyDep,
     TransactionServiceDep,
     UserRepositoryDep,
     WalletServiceDep,
 )
 from app.exceptions import BadRequestError
 from app.logging import get_logger
+from app.models import User
 from app.rate_limiting import limiter
 from app.realtime.manager import ws_manager
 from app.schemas.agreement_schema import (
@@ -132,6 +135,7 @@ async def broadcast_agreement_update(
 async def agreement_websocket(
     websocket: WebSocket,
     agreement_service: AgreementServiceDep,
+    session: SessionDep,
 ):
     """Agreement and dispute events for the authenticated user.
 
@@ -139,10 +143,12 @@ async def agreement_websocket(
     Authorization header. Frame shapes are documented in docs/websockets.md;
     FastAPI does not emit WebSocket routes into openapi.json.
     """
-    user_id = get_user_id_from_ws(websocket)
+    user_id = get_user_id_from_ws(websocket, session)
     if not user_id:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
+    user = session.get(User, user_id)
+    user_email = user.email if user else ""
 
     await ws_manager.connect(user_id, websocket)
     await websocket.send_json(
@@ -163,7 +169,8 @@ async def agreement_websocket(
                     )
                     continue
                 try:
-                    agreement = agreement_service.get_agreement(agreement_id)
+                    require_read_access(session, agreement_id, user_id, user_email)
+                    agreement = agreement_service.get_agreement(agreement_id, user_id)
                     await websocket.send_json(
                         {
                             "type": "agreement",
@@ -224,6 +231,8 @@ async def create_agreement(
         current_user.id,
         agreement_data,
         background_tasks,
+        current_user_email=current_user.email,
+        current_user_name=current_user.name,
     )
 
     invited = user_repository.get_by_email(
@@ -426,15 +435,16 @@ async def reject_agreement(
 @limiter.limit("10/minute")
 async def get_agreement(
     request: Request,
-    _: ActiveUserDep,
+    current_user: ActiveUserDep,
     agreement_service: AgreementServiceDep,
+    session: SessionDep,
     agreement_id: str,
 ):
-    """
-    Get an agreement by its ID.
-    """
-
-    return success_response(data=agreement_service.get_agreement(agreement_id))
+    """Get an agreement. Participants and pending invitees only."""
+    require_read_access(session, agreement_id, current_user.id, current_user.email)
+    return success_response(
+        data=agreement_service.get_agreement(agreement_id, current_user.id)
+    )
 
 
 @router.get(
@@ -746,6 +756,48 @@ async def refund_agreement_escrow(
             "This agreement's escrow has already been released to the beneficiary"
         )
 
+    context, result = perform_escrow_refund(
+        agreement_id, agreement_service, wallet_service, notification_service
+    )
+
+    await broadcast_agreement_update(agreement_service, agreement_id, event="refunded")
+
+    logger.warning(
+        "escrow refunded by admin",
+        extra={
+            "agreement_id": agreement_id,
+            "admin_user_id": current_user.id,
+            "amount": str(context.amount),
+        },
+    )
+
+    idem.bind_reference(result.entry.reference)
+    return idem.complete(
+        success_response(
+            data=EscrowMovementResponse(
+                agreement_id=agreement_id,
+                amount=context.amount,
+                reference=result.entry.reference,
+                available_balance=result.wallet.available_balance,
+                escrow_balance=result.wallet.escrow_balance,
+                replayed=result.replayed,
+            )
+        )
+    )
+
+
+def perform_escrow_refund(
+    agreement_id: str,
+    agreement_service,
+    wallet_service,
+    notification_service,
+):
+    """Return escrow to the depositor and tell both parties.
+
+    Shared by the admin `/refund` endpoint and the dispute-resolution route so
+    a `favour_depositor` outcome pays out through exactly the same code.
+    Idempotent on `esc_ref_{agreement_id}`.
+    """
     # Flushes status = refunded, committed atomically with the ledger entry.
     context = agreement_service.prepare_refund(agreement_id)
 
@@ -775,10 +827,7 @@ async def refund_agreement_escrow(
                 type=NotificationType.ESCROW_REFUNDED,
                 title="Escrow Refunded",
                 message=message,
-                metadata={
-                    "agreement_id": agreement_id,
-                    "amount": str(context.amount),
-                },
+                metadata={"agreement_id": agreement_id, "amount": str(context.amount)},
             )
         except Exception:
             logger.exception(
@@ -786,32 +835,7 @@ async def refund_agreement_escrow(
                 extra={"agreement_id": agreement_id, "recipient_id": user_id},
             )
 
-    agreement_payload = agreement_service.get_agreement(agreement_id)
-    for uid in (context.depositor_user_id, context.beneficiary_user_id):
-        await _send_agreement_ws_payload(uid, agreement_payload, event="refunded")
-
-    logger.warning(
-        "escrow refunded by admin",
-        extra={
-            "agreement_id": agreement_id,
-            "admin_user_id": current_user.id,
-            "amount": str(context.amount),
-        },
-    )
-
-    idem.bind_reference(result.entry.reference)
-    return idem.complete(
-        success_response(
-            data=EscrowMovementResponse(
-                agreement_id=agreement_id,
-                amount=context.amount,
-                reference=result.entry.reference,
-                available_balance=result.wallet.available_balance,
-                escrow_balance=result.wallet.escrow_balance,
-                replayed=result.replayed,
-            )
-        )
-    )
+    return context, result
 
 
 def perform_escrow_release(
@@ -836,7 +860,7 @@ def perform_escrow_release(
     )
 
     # Without this, get_by_id serves a stale `status` from Redis for 5 minutes.
-    agreement_service.mark_agreement_completed_cache(agreement_id)
+    agreement_service.invalidate_agreement_cache(agreement_id)
 
     for user_id, message in (
         (

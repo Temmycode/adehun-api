@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, Request
 
 from app.core.response import (
@@ -35,7 +37,7 @@ async def list_banks(
     request: Request,
     _: ActiveUserDep,
     bank_account_service: BankAccountServiceDep,
-    currency: str = "NGN",
+    currency: Literal["NGN"] = "NGN",
 ):
     """List supported banks. Cached for 24 hours."""
     return success_response(data=await bank_account_service.list_banks(currency))

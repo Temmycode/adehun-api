@@ -5,7 +5,7 @@ from sqlmodel import SQLModel
 from sqlmodel.sql.sqltypes import AutoString
 
 from alembic import context
-from app.config import settings
+from app.database import build_database_url
 from app.models.agreement import Agreement  # noqa: F401
 from app.models.agreement_participant import AgreementParticipant  # noqa: F401
 from app.models.asset import Asset  # noqa: F401
@@ -17,6 +17,7 @@ from app.models.idempotency_key import IdempotencyKey  # noqa: F401
 from app.models.invitation import Invitation  # noqa: F401
 from app.models.notification import Notification  # noqa: F401
 from app.models.paystack_transaction import PaystackTransaction  # noqa: F401
+from app.models.refresh_token import RefreshToken  # noqa: F401
 from app.models.transaction import Transaction  # noqa: F401
 from app.models.wallet import Wallet  # noqa: F401
 from app.models.webhook_event import WebhookEvent  # noqa: F401
@@ -31,11 +32,7 @@ config = context.config
 
 # Set the DB URL programmatically from app settings so we never hardcode
 # credentials in alembic.ini
-config.set_main_option(
-    "sqlalchemy.url",
-    f"postgresql://{settings.database_username}:{settings.database_password}"
-    f"@{settings.database_hostname}:{settings.database_port}/{settings.database_name}",
-)
+config.set_main_option("sqlalchemy.url", build_database_url().replace("%", "%%"))
 
 # Set up Python logging from the alembic.ini [loggers] section
 if config.config_file_name is not None:

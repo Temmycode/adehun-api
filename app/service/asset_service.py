@@ -1,3 +1,4 @@
+from app.common.enums import ParticipantRole
 from app.logging import get_logger
 
 from app.exceptions import (
@@ -27,10 +28,21 @@ class AssetService:
     def __init__(self, asset_repo: AssetRepository):
         self.asset_repo = asset_repo
 
-    def create_asset_signature(self, condition_id: str) -> SignedUploadResponse:
-        """Create a signature for uploading assets"""
+    def create_asset_signature(
+        self, condition_id: str, user_id: str
+    ) -> SignedUploadResponse:
+        """Sign an upload scoped to this condition's folder.
+
+        The router has already verified the caller is a participant; this
+        re-checks the condition exists so a signature is never minted for a
+        made-up id.
+        """
         try:
-            return create_upload_signature("assets")
+            if not self.asset_repo.get_condition(condition_id):
+                raise ConditionNotFoundError()
+            return create_upload_signature(f"assets/{condition_id}")
+        except ConditionNotFoundError:
+            raise
         except Exception as e:
             logger.exception(
                 "failed to create asset upload signature",
@@ -156,20 +168,12 @@ class AssetService:
                 )
                 raise ForbiddenError("User is not a participant of this agreement")
 
-            if participant.id != condition.participant_id:
+            if participant.role != ParticipantRole.DEPOSITOR:
                 logger.warning(
-                    "unauthorized asset approval attempt",
-                    extra={
-                        "condition_id": condition_id,
-                        "asset_id": asset_id,
-                        "user_id": user_id,
-                        "participant_id": participant.id,
-                        "condition_owner_id": condition.participant_id,
-                    },
+                    "non-depositor attempted asset approval",
+                    extra={"condition_id": condition_id, "user_id": user_id},
                 )
-                raise ForbiddenError(
-                    "Only the participant who created the condition can approve its assets."
-                )
+                raise ForbiddenError("Only the depositor can approve assets")
 
             asset = self.asset_repo.get_by_id(asset_id)
             if not asset or asset.condition_id != condition_id:
@@ -230,20 +234,12 @@ class AssetService:
                 )
                 raise ForbiddenError("User is not a participant of this agreement")
 
-            if participant.id != condition.participant_id:
+            if participant.role != ParticipantRole.DEPOSITOR:
                 logger.warning(
-                    "unauthorized asset rejection attempt",
-                    extra={
-                        "condition_id": condition_id,
-                        "asset_id": asset_id,
-                        "user_id": user_id,
-                        "participant_id": participant.id,
-                        "condition_owner_id": condition.participant_id,
-                    },
+                    "non-depositor attempted asset rejection",
+                    extra={"condition_id": condition_id, "user_id": user_id},
                 )
-                raise ForbiddenError(
-                    "Only the participant who created the condition can reject its assets."
-                )
+                raise ForbiddenError("Only the depositor can reject assets")
 
             asset = self.asset_repo.get_by_id(asset_id)
             if not asset or asset.condition_id != condition_id:

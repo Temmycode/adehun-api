@@ -122,16 +122,19 @@ class DisputeStatus(StrEnum):
 
 
 class DisputeResolutionOutcome(StrEnum):
-    """Record-only. None of these move money by themselves.
+    """Outcome of an admin dispute resolution.
 
-    Resolving a dispute writes the outcome and unfreezes the agreement. Moving
-    the money is a separate, explicit call:
-      * FAVOUR_BENEFICIARY -> POST /agreements/{id}/release
-      * FAVOUR_DEPOSITOR   -> POST /agreements/{id}/refund   (admin)
-      * SPLIT              -> no single endpoint; ops must settle it manually,
-                              because the ledger reference scheme allows only
-                              one full refund per agreement.
+    `POST /admin/disputes/{id}/resolve` records the outcome, unfreezes the
+    agreement, and then settles the money in the same request:
+      * FAVOUR_BENEFICIARY -> escrow released (same path as /release)
+      * FAVOUR_DEPOSITOR   -> escrow refunded (same path as /refund)
       * DISMISSED          -> nothing moves; the deal resumes.
+      * SPLIT              -> rejected with 422 for now: the ledger reference
+                              scheme allows only one full movement per
+                              agreement, so partial settlement needs a
+                              per-resolution reference scheme first.
+    If settlement fails after the decision is committed, the admin re-runs the
+    idempotent /release or /refund endpoint.
     """
 
     FAVOUR_DEPOSITOR = "favour_depositor"

@@ -4,8 +4,16 @@ from redis import Redis
 from sqlalchemy import case, func
 from sqlmodel import Session, col, select
 
+from app.common.enums import LedgerEntryType
 from app.logging import get_logger
-from app.models import Agreement, AgreementParticipant, Condition, Invitation, User
+from app.models import (
+    Agreement,
+    AgreementParticipant,
+    Condition,
+    Invitation,
+    Transaction,
+    User,
+)
 from app.redis import RedisClient
 
 logger = get_logger(__name__)
@@ -33,7 +41,9 @@ def _agreement_participant_key(agreement_id: str, participant_id: str) -> str:
 
 
 def _user_agreements_key(user_id: str) -> str:
-    return f"user:{user_id}:agreements"
+    # v2: the cached tuple grew a `funded` flag. A new key avoids reading an
+    # older three-element shape out of Redis after deploy.
+    return f"user:{user_id}:agreements:v2"
 
 
 def agreement_cache_keys(agreement_id: str, user_ids: list[str]) -> list[str]:
@@ -71,10 +81,38 @@ class AgreementRepository(RedisClient):
         self.session.refresh(agreement)
         return agreement
 
-    def get_user_agreements(self, user_id: str) -> list[tuple[Agreement, int, int]]:
+    def get_condition_counts(self, agreement_id: str) -> tuple[int, int]:
+        """(total conditions, approved conditions) for one agreement."""
+        row = self.session.exec(
+            select(
+                func.count(Condition.id),  # pyright: ignore[reportArgumentType]
+                func.sum(case((Condition.status == "approved", 1), else_=0)),
+            ).where(Condition.agreement_id == agreement_id)
+        ).one()
+        total, met = row
+        return int(total or 0), int(met or 0)
+
+    def funded_agreement_ids(self, agreement_ids: list[str]) -> set[str]:
+        """Which of these agreements have an `escrow_lock` ledger entry."""
+        if not agreement_ids:
+            return set()
+        rows = self.session.exec(
+            select(Transaction.agreement_id)
+            .where(col(Transaction.agreement_id).in_(agreement_ids))
+            .where(Transaction.type == LedgerEntryType.ESCROW_LOCK)
+            .distinct()
+        ).all()
+        return {r for r in rows if r}
+
+    def is_funded(self, agreement_id: str) -> bool:
+        return agreement_id in self.funded_agreement_ids([agreement_id])
+
+    def get_user_agreements(
+        self, user_id: str
+    ) -> list[tuple[Agreement, int, int, bool]]:
         """Return a list of agreements for the given user ID.
 
-        Each tuple is (agreement, total_conditions_count, conditions_met_count).
+        Each tuple is (agreement, total_conditions, conditions_met, is_funded).
         """
 
         key = _user_agreements_key(user_id)
@@ -82,8 +120,8 @@ class AgreementRepository(RedisClient):
         if cached is not None:
             logger.debug("cache hit for user agreements", extra={"user_id": user_id})
             return [
-                (self.session.merge(Agreement.model_validate(a)), total, met)
-                for a, total, met in cached
+                (self.session.merge(Agreement.model_validate(a)), total, met, funded)
+                for a, total, met, funded in cached
             ]
 
         logger.debug("fetching user agreements from db", extra={"user_id": user_id})
@@ -115,20 +153,25 @@ class AgreementRepository(RedisClient):
         ).all()
 
         counts_by_agreement = {
-            agreement_id: (total, met or 0)
+            agreement_id: (int(total), int(met or 0))
             for agreement_id, total, met in condition_counts
         }
+        funded_ids = self.funded_agreement_ids(agreement_ids)
 
         results = [
-            (agreement, *counts_by_agreement.get(agreement.id, (0, 0)))
+            (
+                agreement,
+                *counts_by_agreement.get(agreement.id, (0, 0)),
+                agreement.id in funded_ids,
+            )
             for agreement in agreements
         ]
 
         self._cache_set(
             key,
             [
-                (agreement.model_dump(mode="json"), total, met)
-                for agreement, total, met in results
+                (agreement.model_dump(mode="json"), total, met, funded)
+                for agreement, total, met, funded in results
             ],
             _TTL_USER_AGREEMENTS,
         )
@@ -314,19 +357,19 @@ class AgreementRepository(RedisClient):
     def update_agreement_conditions_with_invitation(
         self, agreement_id: str, invitation_id: str, participant_id: str
     ):
-        """Update the conditions of an agreement to replace the email with the participant's id."""
-        condition = self.session.exec(
+        """Point every condition that named the invitee at their participant row."""
+        conditions = self.session.exec(
             select(Condition).where(
                 Condition.agreement_id == agreement_id,
                 Condition.invitation_id == invitation_id,
             )
-        ).first()
+        ).all()
 
-        if condition:
+        for condition in conditions:
             condition.required_from_participant_id = participant_id
             self.session.add(condition)
+        if conditions:
             self.session.commit()
-            self.session.refresh(condition)
 
     def add_all(self, *args: Any) -> None:
         """Add all given objects to the session."""

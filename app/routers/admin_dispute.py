@@ -5,9 +5,14 @@ file level: every route here is gated by `AdminUserDep`, and the service methods
 they call are deliberately unscoped.
 """
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 
-from app.common.enums import DisputeCategory, DisputeStatus, NotificationType
+from app.common.enums import (
+    DisputeCategory,
+    DisputeResolutionOutcome,
+    DisputeStatus,
+    NotificationType,
+)
 from app.core.response import (
     APIResponse,
     ConflictResponse,
@@ -22,9 +27,16 @@ from app.dependencies import (
     AgreementServiceDep,
     DisputeServiceDep,
     NotificationServiceDep,
+    TransactionServiceDep,
+    WalletServiceDep,
 )
 from app.logging import get_logger
 from app.rate_limiting import limiter
+from app.routers.agreement import (
+    broadcast_agreement_update,
+    perform_escrow_refund,
+    perform_escrow_release,
+)
 from app.routers.dispute import broadcast_dispute_change, notify
 from app.schemas.dispute_schema import (
     DisputeListResponse,
@@ -56,8 +68,8 @@ async def list_disputes(
     dispute_service: DisputeServiceDep,
     status: DisputeStatus | None = None,
     category: DisputeCategory | None = None,
-    skip: int = 0,
-    limit: int = 20,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
 ):
     """The dispute queue, newest first. Filterable by status and category."""
     return success_response(
@@ -139,16 +151,55 @@ async def resolve_dispute(
     dispute_service: DisputeServiceDep,
     agreement_service: AgreementServiceDep,
     notification_service: NotificationServiceDep,
+    wallet_service: WalletServiceDep,
+    transaction_service: TransactionServiceDep,
 ):
-    """Record a binding outcome and unfreeze the agreement.
+    """Record a binding outcome, unfreeze the agreement, and settle the money.
 
-    RECORD-ONLY: this moves no money for any outcome. It writes the decision
-    and restores the agreement to its pre-dispute status, after which the
-    normal release flow can run. Payout and refund remain separate actions.
+    * `favour_beneficiary`: escrow is released to the beneficiary. The admin's
+      decision stands in for condition approval, so the all-conditions check is
+      deliberately bypassed.
+    * `favour_depositor`: escrow is refunded to the depositor.
+    * `dismissed`: nothing moves; the deal resumes.
+    * `split`: rejected at validation (422) until partial settlement exists.
+
+    The decision is committed first. If the payout then fails, the response
+    still carries the resolved dispute plus a message; both payout paths are
+    idempotent, so the admin re-runs `/release` or `/refund` to settle.
     """
     dispute = dispute_service.admin_resolve_dispute(
         dispute_id, current_user.id, resolution
     )
+
+    payout_message: str | None = None
+    agreement_id = dispute.agreement_id
+    funded = transaction_service.is_agreement_funded(agreement_id)
+    released = transaction_service.is_agreement_released(agreement_id)
+    try:
+        if funded and not released:
+            if resolution.outcome == DisputeResolutionOutcome.FAVOUR_BENEFICIARY:
+                perform_escrow_release(
+                    agreement_id, agreement_service, wallet_service, notification_service
+                )
+                await broadcast_agreement_update(
+                    agreement_service, agreement_id, event="released"
+                )
+            elif resolution.outcome == DisputeResolutionOutcome.FAVOUR_DEPOSITOR:
+                perform_escrow_refund(
+                    agreement_id, agreement_service, wallet_service, notification_service
+                )
+                await broadcast_agreement_update(
+                    agreement_service, agreement_id, event="refunded"
+                )
+    except Exception:
+        logger.exception(
+            "dispute resolved but payout failed; retry via /release or /refund",
+            extra={"dispute_id": dispute.id, "agreement_id": agreement_id},
+        )
+        payout_message = (
+            "Dispute resolved, but the payout could not be completed. "
+            "Retry with POST /agreements/{id}/release or /refund."
+        )
 
     for party in (dispute.raised_by, dispute.against_user):
         if party:
@@ -169,4 +220,4 @@ async def resolve_dispute(
 
     await broadcast_dispute_change(dispute, agreement_service, event="resolved")
 
-    return success_response(data=dispute)
+    return success_response(data=dispute, message=payout_message)

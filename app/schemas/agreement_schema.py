@@ -1,10 +1,11 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
-from app.common.enums import AgreementStatus
-
+from app.common.enums import AgreementStatus, ParticipantRole
+from app.config import settings
+from app.core.validators import reject_sub_kobo
 from app.schemas.conditions_schema import ConditionCreate, ConditionResponse
 from app.schemas.participant_schema import ParticipantResponse
 from app.schemas.user_schema import UserResponse
@@ -15,10 +16,8 @@ class AgreementInvitationResponse(BaseModel):
     email: str
     token: str
     role: str
-    # NOTE: this is the INVITATION's status, not the agreement's. The column
-    # takes pending/accepted/expired, which is a different vocabulary from the
-    # InvitationStatus enum (invited/accepted/rejected) used by
-    # AgreementParticipant.status. Left untyped until those two are reconciled.
+    # NOTE: this is the INVITATION's status (pending/accepted/expired), not the
+    # agreement's, and not AgreementParticipant.status (invited/accepted/rejected).
     status: str
     expires_at: datetime
 
@@ -26,16 +25,30 @@ class AgreementInvitationResponse(BaseModel):
 
 
 class AgreementCreate(BaseModel):
-    # Agreement Participants
-    other_participant_email_or_phone: str
-    role: str
-    # Agreement Data
-    title: str
-    description: str
-    # Transaction Data
-    amount: Decimal
-    # Initial conditions
-    conditions: list[ConditionCreate]
+    # The field name is historical; only email addresses are accepted. Phone
+    # invitations were never deliverable (every lookup downstream is by email).
+    other_participant_email_or_phone: EmailStr
+    role: ParticipantRole
+    title: str = Field(min_length=1, max_length=120)
+    description: str = Field(min_length=1, max_length=2000)
+    amount: Decimal = Field(gt=0, le=settings.agreement_max_amount)
+    conditions: list[ConditionCreate] = Field(default_factory=list, max_length=20)
+
+    _validate_amount = field_validator("amount")(reject_sub_kobo)
+
+    @field_validator("title", "description")
+    @classmethod
+    def _strip(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("other_participant_email_or_phone", mode="after")
+    @classmethod
+    def _lower_email(cls, value: str) -> str:
+        return value.lower()
+
+    @property
+    def invitee_email(self) -> str:
+        return str(self.other_participant_email_or_phone)
 
 
 class AgreementResponse(BaseModel):

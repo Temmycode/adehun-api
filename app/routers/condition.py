@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request
 
 from app.common.enums import AgreementStatus, NotificationType
+from app.core.authz import require_participant, require_read_access
 from app.core.response import (
     APIResponse,
     ForbiddenResponse,
@@ -9,6 +10,7 @@ from app.core.response import (
     UnauthorizedResponse,
     success_response,
 )
+from app.database import SessionDep
 from app.dependencies import (
     ActiveUserDep,
     AgreementServiceDep,
@@ -160,8 +162,10 @@ async def add_condition_to_agreement(
     condition_service: ConditionServiceDep,
     agreement_service: AgreementServiceDep,
     notification_service: NotificationServiceDep,
+    session: SessionDep,
 ):
-    """Add a condition to an agreement."""
+    """Add a condition to an agreement. Participants only, while pending."""
+    require_participant(session, agreement_id, current_user.id)
     condition = condition_service.add_condition(
         agreement_id, current_user.id, condition_data
     )
@@ -190,8 +194,10 @@ async def get_agreement_conditions(
     agreement_id: str,
     current_user: ActiveUserDep,
     condition_service: ConditionServiceDep,
+    session: SessionDep,
 ):
-    """Get conditions for the authenticated user."""
+    """List an agreement's conditions. Participants and pending invitees."""
+    require_read_access(session, agreement_id, current_user.id, current_user.email)
     return success_response(
         data=condition_service.get_agreement_conditions(agreement_id, current_user.id)
     )
@@ -206,10 +212,13 @@ async def get_agreement_conditions(
 async def get_condition_details(
     request: Request,
     condition_id: str,
-    _: ActiveUserDep,
+    current_user: ActiveUserDep,
     condition_service: ConditionServiceDep,
+    session: SessionDep,
 ):
-    """Get a condition by id."""
+    """Get a condition by id. Participants and pending invitees."""
+    agreement_id = condition_service.get_agreement_id_for_condition(condition_id)
+    require_read_access(session, agreement_id, current_user.id, current_user.email)
     return success_response(data=condition_service.get_condition(condition_id))
 
 

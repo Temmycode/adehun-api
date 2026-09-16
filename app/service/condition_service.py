@@ -1,14 +1,15 @@
-from app.logging import get_logger
 from datetime import datetime, timezone
 
+from app.common.enums import AgreementStatus, ParticipantRole
 from app.exceptions import (
+    BadRequestError,
     ConditionNotFoundError,
     ConditionSaveError,
     ForbiddenError,
     ParticipantNotFoundError,
 )
-from app.models import AgreementParticipant, Condition, Invitation
-from app.redis import RedisClient
+from app.logging import get_logger
+from app.models import Agreement, AgreementParticipant, Condition, Invitation
 from app.repository.condition_repository import ConditionRepository
 from app.schemas.conditions_schema import (
     BatchConditionResponse,
@@ -27,73 +28,118 @@ def _condition_key(condition_id: str) -> str:
     return f"condition:{condition_id}"
 
 
-# ---------------------------------------------------------------------------
-# Service
-# ---------------------------------------------------------------------------
-class ConditionService(RedisClient):
+# Statuses in which the depositor may still decide on a condition.
+_DECIDABLE_STATUSES = {"pending", "submitted", "rejected"}
+
+
+class ConditionService:
+    """Conditions are the deliverables that hold the escrow.
+
+    Authority model:
+      * either accepted participant may ADD a condition while the agreement is
+        still `pending` (before both sides have committed and money moved);
+      * only the DEPOSITOR (the payer) may APPROVE or REJECT a condition, and
+        only while the agreement is `active` (funded, not disputed). The
+        beneficiary fulfils conditions; they never sign off on their own work.
+    """
+
     def __init__(self, condition_repo: ConditionRepository):
         self.condition_repo = condition_repo
+
+    # ------------------------------------------------------------------ #
+    #  Helpers                                                            #
+    # ------------------------------------------------------------------ #
+
+    def _get_agreement(self, agreement_id: str) -> Agreement | None:
+        return self.condition_repo.session.get(Agreement, agreement_id)
+
+    def _require_condition(self, condition_id: str) -> Condition:
+        condition = self.condition_repo.get_by_id(condition_id)
+        if not condition:
+            logger.info("condition not found", extra={"condition_id": condition_id})
+            raise ConditionNotFoundError()
+        return condition
+
+    def _require_depositor(
+        self, condition: Condition, user_id: str
+    ) -> AgreementParticipant:
+        participant = self.condition_repo.get_participant(
+            user_id, condition.agreement_id
+        )
+        if not participant:
+            raise ForbiddenError("You are not a participant in this agreement")
+        if participant.role != ParticipantRole.DEPOSITOR:
+            logger.warning(
+                "non-depositor attempted a condition decision",
+                extra={"condition_id": condition.id, "user_id": user_id},
+            )
+            raise ForbiddenError("Only the depositor can approve or reject conditions")
+
+        agreement = self._get_agreement(condition.agreement_id)
+        if agreement is None or agreement.status != AgreementStatus.ACTIVE:
+            status = agreement.status if agreement else "missing"
+            raise BadRequestError(
+                f"Conditions can only be decided while the agreement is active "
+                f"(current status: {status})"
+            )
+        if condition.status not in _DECIDABLE_STATUSES:
+            raise BadRequestError(
+                f"A condition that is {condition.status} cannot be changed"
+            )
+        return participant
+
+    def _invalidate(self, agreement_id: str, condition_id: str | None = None) -> None:
+        keys = [_agreement_condition(agreement_id)]
+        if condition_id:
+            keys.append(_condition_key(condition_id))
+        self.condition_repo._cache_delete(*keys)
+
+    # ------------------------------------------------------------------ #
+    #  Commands                                                           #
+    # ------------------------------------------------------------------ #
 
     def add_condition(
         self, agreement_id: str, user_id: str, condition_data: ConditionCreate
     ) -> ConditionResponse:
-        """Add a new condition to an agreement."""
-
-        # get the participant for the user and agreement
+        """Add a condition. Allowed for participants while the deal is pending."""
         current_participant = self.condition_repo.get_participant(user_id, agreement_id)
-
         if not current_participant:
-            logger.error(
-                "participant not found when adding condition",
-                extra={"user_id": user_id, "agreement_id": agreement_id},
-            )
             raise ParticipantNotFoundError()
 
-        other_participant_or_invitation = (
-            self.condition_repo.get_participant_or_invitation_by_email(
-                condition_data.required_from_email, agreement_id
+        agreement = self._get_agreement(agreement_id)
+        if agreement is None:
+            raise ParticipantNotFoundError()
+        if agreement.status != AgreementStatus.PENDING:
+            raise BadRequestError(
+                "Conditions can only be added before the agreement becomes active"
             )
-        )
 
-        if not other_participant_or_invitation:
-            logger.error(
+        other = self.condition_repo.get_participant_or_invitation_by_email(
+            str(condition_data.required_from_email), agreement_id
+        )
+        if not other:
+            logger.info(
                 "required_from participant/invitation not found",
-                extra={
-                    "required_from_email": condition_data.required_from_email,
-                    "agreement_id": agreement_id,
-                },
+                extra={"agreement_id": agreement_id},
             )
             raise ParticipantNotFoundError()
 
         condition = Condition(
             agreement_id=agreement_id,
             participant_id=current_participant.id,
-            **condition_data.model_dump(mode="json"),
+            title=condition_data.title,
+            description=condition_data.description,
             required_from_participant_id=(
-                other_participant_or_invitation.id
-                if isinstance(other_participant_or_invitation, AgreementParticipant)
-                else None
+                other.id if isinstance(other, AgreementParticipant) else None
             ),
-            invitation_id=(
-                other_participant_or_invitation.id
-                if isinstance(other_participant_or_invitation, Invitation)
-                else None
-            ),
+            invitation_id=other.id if isinstance(other, Invitation) else None,
         )
         try:
             self.condition_repo.save_condition(condition)
-
-            # Invalidate agreement cache
-            self._cache_delete(
-                _agreement_condition(agreement_id),
-            )
+            self._invalidate(agreement_id)
             logger.info(
                 "condition created",
-                extra={
-                    "condition_id": condition.id,
-                    "agreement_id": agreement_id,
-                    "participant_id": current_participant.id,
-                },
+                extra={"condition_id": condition.id, "agreement_id": agreement_id},
             )
             return ConditionResponse.model_validate(
                 self.condition_repo.get_by_id(condition.id)
@@ -102,141 +148,63 @@ class ConditionService(RedisClient):
             self.condition_repo.rollback()
             logger.exception(
                 "failed to save condition",
-                extra={
-                    "agreement_id": agreement_id,
-                    "user_id": user_id,
-                    "error": str(e),
-                },
+                extra={"agreement_id": agreement_id, "user_id": user_id},
             )
             raise ConditionSaveError() from e
 
     def approve_condition(self, condition_id: str, user_id: str) -> ConditionResponse:
-        """Approve a condition for a given agreement."""
-        condition = self.condition_repo.get_by_id(condition_id)
-        if not condition:
-            logger.error(
-                "condition not found for approval",
-                extra={"condition_id": condition_id, "user_id": user_id},
-            )
-            raise ConditionNotFoundError()
-
-        participant = self.condition_repo.get_participant(
-            user_id, condition.agreement_id
-        )
-        if not participant:
-            logger.error(
-                "participant not found for condition approval",
-                extra={"user_id": user_id, "agreement_id": condition.agreement_id},
-            )
-            raise ParticipantNotFoundError()
-        if participant.id != condition.participant_id:
-            logger.warning(
-                "unauthorized condition approval attempt",
-                extra={
-                    "condition_id": condition_id,
-                    "user_id": user_id,
-                    "participant_id": participant.id,
-                    "condition_owner_id": condition.participant_id,
-                },
-            )
-            raise ForbiddenError(
-                "Only the participant who created the condition can approve it."
-            )
+        condition = self._require_condition(condition_id)
+        self._require_depositor(condition, user_id)
 
         condition.approved_at = datetime.now(timezone.utc)
+        condition.rejected_reason = None
         condition.status = "approved"
         self.condition_repo.save_condition(condition)
+        self._invalidate(condition.agreement_id, condition_id)
 
-        # Invalidate condition cache
-        self._cache_delete(
-            _agreement_condition(condition.agreement_id),
-            _condition_key(condition_id),
-        )
         logger.info(
-            "condition approved",
-            extra={"condition_id": condition_id, "user_id": user_id},
+            "condition approved", extra={"condition_id": condition_id, "user_id": user_id}
         )
         return ConditionResponse.model_validate(condition)
 
     def reject_condition(
         self, condition_id: str, user_id: str, rejected_reason: str
     ) -> ConditionResponse:
-        """Reject a condition for a given agreement."""
-        condition = self.condition_repo.get_by_id(condition_id)
-        if not condition:
-            logger.error(
-                "condition not found for rejection",
-                extra={"condition_id": condition_id, "user_id": user_id},
-            )
-            raise ConditionNotFoundError()
-
-        participant = self.condition_repo.get_participant(
-            user_id, condition.agreement_id
-        )
-        if not participant:
-            logger.error(
-                "participant not found for condition rejection",
-                extra={"user_id": user_id, "agreement_id": condition.agreement_id},
-            )
-            raise ParticipantNotFoundError()
-        if participant.id != condition.participant_id:
-            logger.warning(
-                "unauthorized condition rejection attempt",
-                extra={
-                    "condition_id": condition_id,
-                    "user_id": user_id,
-                    "participant_id": participant.id,
-                    "condition_owner_id": condition.participant_id,
-                },
-            )
-            raise ForbiddenError(
-                "Only the participant who created the condition can approve it."
-            )
+        condition = self._require_condition(condition_id)
+        self._require_depositor(condition, user_id)
 
         condition.rejected_reason = rejected_reason
+        condition.approved_at = None
         condition.status = "rejected"
         self.condition_repo.save_condition(condition)
+        self._invalidate(condition.agreement_id, condition_id)
 
-        # Invalidate agreement cache
-        self.condition_repo._cache_delete(
-            _agreement_condition(condition.agreement_id),
-            _condition_key(condition_id),
-        )
         logger.info(
-            "condition rejected",
-            extra={
-                "condition_id": condition_id,
-                "user_id": user_id,
-                "reason": rejected_reason,
-            },
+            "condition rejected", extra={"condition_id": condition_id, "user_id": user_id}
         )
         return ConditionResponse.model_validate(condition)
 
+    # ------------------------------------------------------------------ #
+    #  Queries                                                            #
+    # ------------------------------------------------------------------ #
+
     def get_condition(self, condition_id: str) -> ConditionResponse:
-        db_condition = self.condition_repo.get_by_id(condition_id)
+        return ConditionResponse.model_validate(self._require_condition(condition_id))
 
-        if not db_condition:
-            logger.error(
-                "condition not found",
-                extra={"condition_id": condition_id},
-            )
-            raise ConditionNotFoundError()
-
-        return ConditionResponse.model_validate(db_condition)
+    def get_agreement_id_for_condition(self, condition_id: str) -> str:
+        return self._require_condition(condition_id).agreement_id
 
     def get_agreement_conditions(
         self, agreement_id: str, user_id: str
-    ) -> list[ConditionResponse]:
+    ) -> list[BatchConditionResponse]:
         conditions = self.condition_repo.get_agreement_condition(agreement_id, user_id)
-
-        return [ConditionResponse.model_validate(condition) for condition in conditions]
+        return [BatchConditionResponse.model_validate(c) for c in conditions]
 
     def all_conditions_approved(self, agreement_id: str, user_id: str) -> bool:
-        """Whether every condition on the agreement has been approved.
+        """Whether every condition has been approved.
 
-        This is what triggers the automatic escrow release. An agreement with no
-        conditions at all does not auto-release — there would be nothing holding
-        the money, and releasing on that basis would be a surprise.
+        An agreement with no conditions never auto-releases: there would be
+        nothing holding the money, and releasing on that basis is a surprise.
         """
         conditions = self.condition_repo.get_agreement_condition(agreement_id, user_id)
         if not conditions:
